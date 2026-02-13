@@ -4,6 +4,16 @@
 
 A powerful CLI tool to browse, download, and **evaluate the accuracy** of local Whisper models (GGUF format). It is specifically designed to stress-test models on difficult, real-world audio ("field recordings") to determine which versions can successfully detect speech amidst noise.
 
+### Benchmark Results (Noisy Outdoor Audio)
+
+| Model       | Discovery Rate (Finding Meetings) | Quality Score (0-10) | Verdict                                |
+| :---------- | :-------------------------------- | :------------------- | :------------------------------------- |
+| **base.en** | **58%**                           | 4.2                  | 🏆 **Best Overall**                    |
+| large-v3    | 31%                               | **5.1** (Best Text)  | High fidelity, but misses 2/3 meetings |
+| large-v1    | 44%                               | 4.4                  | Reliable backup choice                 |
+| large-v2    | 3%                                | 4.6                  | ❌ Misses almost everything            |
+| turbo       | 8%                                | 1.8                  | ❌ Poor sensitivity & quality          |
+
 ## Key Features
 
 ### 1. ⚡ Live Model Listing
@@ -119,16 +129,6 @@ python assess_quality.py --limit 0
 ```
 
 **Key Findings: The Discovery vs. Quality Trade-off**
-
-### Benchmark Results (Noisy Outdoor Audio)
-
-| Model       | Discovery Rate (Finding Meetings) | Quality Score (0-10) | Verdict                                |
-| :---------- | :-------------------------------- | :------------------- | :------------------------------------- |
-| **base.en** | **58%**                           | 4.2                  | 🏆 **Best Overall**                    |
-| large-v3    | 31%                               | **5.1** (Best Text)  | High fidelity, but misses 2/3 meetings |
-| large-v1    | 44%                               | 4.4                  | Reliable backup choice                 |
-| large-v2    | 3%                                | 4.6                  | ❌ Misses almost everything            |
-| turbo       | 8%                                | 1.8                  | ❌ Poor sensitivity & quality          |
 
 New users should understand why different models excel at different tasks:
 
