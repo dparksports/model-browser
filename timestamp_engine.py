@@ -44,19 +44,17 @@ def _load_vlm():
         import torch
         model_name = "Qwen/Qwen2.5-VL-7B-Instruct"
 
-        # Check CUDA compatibility — RTX 50-series (sm_120) needs cu128+
-        use_cuda = torch.cuda.is_available()
-        if use_cuda:
-            cap = torch.cuda.get_device_capability()
-            max_supported = (9, 0)  # cu126 supports up to sm_90
-            if cap > max_supported:
-                # Check if this PyTorch build actually supports the GPU
-                try:
-                    torch.zeros(1, device="cuda")  # Quick smoke test
-                except RuntimeError:
-                    print(f"[TIMESTAMP] GPU sm_{cap[0]}{cap[1]}0 not supported by this PyTorch build — falling back to CPU.")
-                    print("[TIMESTAMP] To use GPU, reinstall VLM deps with the latest CUDA support.")
-                    use_cuda = False
+        # Try to use GPU — do a quick smoke test to confirm it works
+        use_cuda = False
+        if torch.cuda.is_available():
+            try:
+                torch.zeros(1, device="cuda")
+                use_cuda = True
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_mem = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                print(f"[TIMESTAMP] GPU detected: {gpu_name} ({gpu_mem:.1f} GB)")
+            except RuntimeError as e:
+                print(f"[TIMESTAMP] GPU available but unusable ({e}) — falling back to CPU.")
 
         dtype = torch.bfloat16 if use_cuda else torch.float32
         device_map = "auto" if use_cuda else "cpu"
