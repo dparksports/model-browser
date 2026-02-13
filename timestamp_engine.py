@@ -299,25 +299,67 @@ def run_extract_timestamps(file_path, num_frames=5, crop_ratio=0.08):
     return output
 
 
-def _sanitize_for_filename(timestamp_text):
+def _parse_timestamp_parts(timestamp_text):
     """
-    Convert a raw timestamp string into a filesystem-safe name.
-    E.g. '2024/01/15 10:30:22' → '2024-01-15_10-30-22'
+    Parse a raw timestamp string into (date_str, time_str) filesystem-safe parts.
+    Handles formats like '2026/02/01 07:25:16 am SUN', '2024-01-15 10:30:22', etc.
+    Returns (date, time) e.g. ('2026-02-01', '07-25-16') or (None, sanitized_full).
     """
     if not timestamp_text:
-        return None
-    # Replace common separators with dashes/underscores
+        return None, None
     import re
     s = timestamp_text.strip()
-    # Normalize date separators (/ . ) to dash
-    s = re.sub(r'[/.]', '-', s)
-    # Replace colons with dashes (time)
+
+    # Try to match: DATE TIME [am/pm] [day-of-week]
+    # Common patterns: YYYY/MM/DD HH:MM:SS am DAY, YYYY-MM-DD HH:MM:SS, etc.
+    m = re.match(
+        r'(\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2})\s+'   # date
+        r'(\d{1,2}[:\-]\d{2}(?:[:\-]\d{2})?)'         # time (HH:MM or HH:MM:SS)
+        r'(?:\s*(am|pm))?'                              # optional am/pm
+        r'(?:\s*\w+)?',                                 # optional day name
+        s, re.IGNORECASE
+    )
+    if m:
+        date_part = re.sub(r'[/\.]', '-', m.group(1))     # normalize to YYYY-MM-DD
+        time_part = m.group(2).replace(':', '-')           # HH-MM or HH-MM-SS
+        ampm = m.group(3)
+        if ampm:
+            time_part += ampm.lower()                      # e.g. 07-00-01am
+        return date_part, time_part
+
+    # Fallback: just sanitize the whole thing
+    s = re.sub(r'[/\.]', '-', s)
     s = s.replace(':', '-')
-    # Replace spaces with underscores
     s = re.sub(r'\s+', '_', s)
-    # Remove any remaining unsafe characters
     s = re.sub(r'[<>:"/\\|?*]', '', s)
-    return s if s else None
+    return None, s if s else None
+
+
+def _build_rename(start_text, end_text):
+    """
+    Build a compact filename from start/end timestamps.
+    Format: DATE_STARTTIME_to_ENDTIME.mp4  (one date, two times)
+    E.g. '2026-02-01_07-00_to_07-25.mp4'
+    """
+    start_date, start_time = _parse_timestamp_parts(start_text)
+    end_date, end_time = _parse_timestamp_parts(end_text)
+
+    # Pick the date (prefer start, fall back to end)
+    date = start_date or end_date
+
+    if date and start_time and end_time:
+        return f"{date}_{start_time}_to_{end_time}.mp4"
+    elif date and start_time:
+        return f"{date}_{start_time}.mp4"
+    elif date and end_time:
+        return f"{date}_{end_time}.mp4"
+    elif start_time and end_time:
+        return f"{start_time}_to_{end_time}.mp4"
+    elif start_time:
+        return f"{start_time}.mp4"
+    elif end_time:
+        return f"{end_time}.mp4"
+    return None
 
 
 def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None, do_rename=True):
@@ -406,15 +448,7 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
         was_renamed = False
 
         if do_rename and (start_text or end_text):
-            start_safe = _sanitize_for_filename(start_text)
-            end_safe = _sanitize_for_filename(end_text)
-
-            if start_safe and end_safe:
-                new_filename = f"{start_safe}_to_{end_safe}.mp4"
-            elif start_safe:
-                new_filename = f"{start_safe}.mp4"
-            elif end_safe:
-                new_filename = f"{end_safe}.mp4"
+            new_filename = _build_rename(start_text, end_text)
 
             if new_filename and new_filename != filename:
                 new_path = os.path.join(os.path.dirname(video_path), new_filename)
