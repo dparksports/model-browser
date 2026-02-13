@@ -73,11 +73,25 @@ def _ensure_deps():
         except ImportError:
             missing.append(pip_name)
 
-    if not missing:
+    # Also check if torch is CPU-only (needs CUDA reinstall)
+    torch_needs_cuda = False
+    if "torch" not in [p for p in missing]:
+        try:
+            import torch
+            if not torch.cuda.is_available() and "+cpu" in torch.__version__:
+                torch_needs_cuda = True
+        except Exception:
+            pass
+
+    if not missing and not torch_needs_cuda:
         return True
 
-    print(f"{_YELLOW}⚠  Missing packages: {', '.join(missing)}{_RESET}")
-    print(f"{_DIM}   These are needed for downloading and running Whisper models.{_RESET}")
+    if missing:
+        print(f"{_YELLOW}⚠  Missing packages: {', '.join(missing)}{_RESET}")
+        print(f"{_DIM}   These are needed for downloading and running Whisper models.{_RESET}")
+    if torch_needs_cuda:
+        print(f"{_YELLOW}⚠  PyTorch is CPU-only — GPU acceleration is disabled.{_RESET}")
+        print(f"{_DIM}   Will reinstall PyTorch with CUDA 12.8 support for GPU usage.{_RESET}")
     print()
 
     try:
@@ -90,8 +104,33 @@ def _ensure_deps():
         print(f"{_DIM}   Skipped. Some features may not work.{_RESET}")
         return False
 
-    print(f"\n{_CYAN}📦 Installing {len(missing)} package(s)...{_RESET}")
-    for pkg in missing:
+    # Separate torch packages (need special index URL) from regular packages
+    _TORCH_PKGS = {"torch", "torchvision", "torchaudio"}
+    torch_pkgs = [p for p in missing if p in _TORCH_PKGS]
+    other_pkgs = [p for p in missing if p not in _TORCH_PKGS]
+
+    # If torch is CPU-only, also reinstall it with CUDA
+    if torch_needs_cuda and not torch_pkgs:
+        torch_pkgs = ["torch", "torchvision", "torchaudio"]
+
+    total = len(torch_pkgs) + len(other_pkgs)
+    print(f"\n{_CYAN}📦 Installing {total} package(s)...{_RESET}")
+
+    # Install torch packages with CUDA 12.8 (required for RTX 50-series / Blackwell)
+    if torch_pkgs:
+        print(f"   {_DIM}pip install {' '.join(torch_pkgs)} (with CUDA 12.8)...{_RESET}")
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install"] + torch_pkgs +
+            ["--index-url", "https://download.pytorch.org/whl/cu128", "--force-reinstall", "--no-deps"],
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            print(f"   {_GREEN}✅ {' '.join(torch_pkgs)} (CUDA 12.8){_RESET}")
+        else:
+            print(f"   {_RED}❌ {' '.join(torch_pkgs)} — {result.stderr.decode(errors='replace').strip()[-200:]}{_RESET}")
+
+    # Install other packages normally
+    for pkg in other_pkgs:
         print(f"   {_DIM}pip install {pkg}...{_RESET}")
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", pkg],
