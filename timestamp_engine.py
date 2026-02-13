@@ -153,6 +153,85 @@ def _crop_timestamp_region(image_path, crop_ratio=0.08):
         return image_path
 
 
+def _crop_camera_label_region(image_path, ratio=0.12):
+    """Crop the lower-right corner of the frame where camera labels usually appear."""
+    try:
+        from PIL import Image
+        img = Image.open(image_path)
+        w, h = img.size
+        # Lower-right corner: bottom 'ratio' of height, right 40% of width
+        left = int(w * 0.60)
+        top = int(h * (1 - ratio))
+        cropped = img.crop((left, top, w, h))
+        cropped_path = image_path.replace(".jpg", "_camera.jpg").replace(".png", "_camera.png")
+        cropped.save(cropped_path)
+        return cropped_path
+    except Exception as e:
+        print(f"[ERROR] Camera label crop failed: {e}")
+        return image_path
+
+
+def _read_camera_label(model, processor, image_path):
+    """Use VLM to read camera name/label from a cropped image region."""
+    try:
+        from PIL import Image
+        from qwen_vl_utils import process_vision_info
+
+        image = Image.open(image_path)
+
+        prompt = (
+            "Read the camera name or location label shown in this image. "
+            "Return ONLY the camera name text (e.g. 'driveway1104', 'backyard', 'garage_cam'), nothing else. "
+            "If no camera name is visible, respond with 'NONE'."
+        )
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        image_inputs, video_inputs = process_vision_info(messages)
+        inputs = processor(
+            text=[text],
+            images=image_inputs,
+            videos=video_inputs,
+            padding=True,
+            return_tensors="pt",
+        ).to(model.device)
+
+        generated_ids = model.generate(**inputs, max_new_tokens=64)
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        output_text = processor.batch_decode(
+            generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0].strip()
+
+        return output_text if output_text and output_text != "NONE" else None
+
+    except Exception as e:
+        print(f"[ERROR] Camera label extraction failed: {e}")
+        return None
+
+
+def _sanitize_label(label):
+    """Sanitize a camera label for use in filenames."""
+    import re
+    if not label:
+        return None
+    s = label.strip()
+    s = re.sub(r'[<>:"/\\|?*]', '', s)   # remove invalid filename chars
+    s = re.sub(r'\s+', '_', s)             # spaces to underscores
+    s = s.strip('_.-')
+    return s if s else None
+
+
 def _read_timestamp_from_image(model, processor, image_path):
     """Use VLM to read timestamp text from an image."""
     try:
@@ -335,11 +414,11 @@ def _parse_timestamp_parts(timestamp_text):
     return None, s if s else None
 
 
-def _build_rename(start_text, end_text):
+def _build_rename(start_text, end_text, camera_label=None):
     """
-    Build a compact filename from start/end timestamps.
-    Format: DATE_STARTTIME_to_ENDTIME.mp4  (one date, two times)
-    E.g. '2026-02-01_07-00_to_07-25.mp4'
+    Build a compact filename from start/end timestamps and optional camera label.
+    Format: CAMERA-DATE_STARTTIME_to_ENDTIME.mp4
+    E.g. 'driveway1104-2026-02-01_07-00am_to_07-25am.mp4'
     """
     start_date, start_time = _parse_timestamp_parts(start_text)
     end_date, end_time = _parse_timestamp_parts(end_text)
@@ -347,19 +426,27 @@ def _build_rename(start_text, end_text):
     # Pick the date (prefer start, fall back to end)
     date = start_date or end_date
 
+    # Build time portion
     if date and start_time and end_time:
-        return f"{date}_{start_time}_to_{end_time}.mp4"
+        name = f"{date}_{start_time}_to_{end_time}"
     elif date and start_time:
-        return f"{date}_{start_time}.mp4"
+        name = f"{date}_{start_time}"
     elif date and end_time:
-        return f"{date}_{end_time}.mp4"
+        name = f"{date}_{end_time}"
     elif start_time and end_time:
-        return f"{start_time}_to_{end_time}.mp4"
+        name = f"{start_time}_to_{end_time}"
     elif start_time:
-        return f"{start_time}.mp4"
+        name = f"{start_time}"
     elif end_time:
-        return f"{end_time}.mp4"
-    return None
+        name = f"{end_time}"
+    else:
+        return None
+
+    # Prepend camera label if available
+    label = _sanitize_label(camera_label)
+    if label:
+        return f"{label}-{name}.mp4"
+    return f"{name}.mp4"
 
 
 def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None, do_rename=True):
@@ -417,6 +504,7 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
             result = {
                 "original_file": filename,
                 "new_file": None,
+                "camera_label": None,
                 "folder": os.path.dirname(os.path.abspath(video_path)),
                 "start_timestamp": None,
                 "end_timestamp": None,
@@ -431,8 +519,10 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
 
         start_text = None
         end_text = None
+        camera_label = None
 
         for i, frame in enumerate(frames):
+            # Extract timestamp from top of frame
             cropped = _crop_timestamp_region(frame["path"], crop_ratio)
             raw = _read_timestamp_from_image(model, processor, cropped)
             if raw and raw != "NONE" and raw != "ERROR":
@@ -443,12 +533,19 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
             label = "start" if i == 0 else "end"
             print(f"[BATCH]   {label}: {raw}")
 
-        # Build new filename from timestamps
+            # Extract camera label from lower-right of first frame only
+            if i == 0:
+                cam_crop = _crop_camera_label_region(frame["path"])
+                camera_label = _read_camera_label(model, processor, cam_crop)
+                if camera_label:
+                    print(f"[BATCH]   camera: {camera_label}")
+
+        # Build new filename from timestamps + camera label
         new_filename = None
         was_renamed = False
 
         if do_rename and (start_text or end_text):
-            new_filename = _build_rename(start_text, end_text)
+            new_filename = _build_rename(start_text, end_text, camera_label=camera_label)
 
             if new_filename and new_filename != filename:
                 new_path = os.path.join(os.path.dirname(video_path), new_filename)
@@ -474,6 +571,7 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
         result = {
             "original_file": filename,
             "new_file": new_filename if was_renamed else filename,
+            "camera_label": camera_label,
             "folder": os.path.dirname(os.path.abspath(video_path)),
             "start_timestamp": start_text,
             "end_timestamp": end_text,
@@ -492,7 +590,7 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
     try:
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=[
-                "original_file", "new_file", "folder",
+                "original_file", "new_file", "camera_label", "folder",
                 "start_timestamp", "end_timestamp",
                 "duration_sec", "renamed", "error"
             ])
