@@ -29,9 +29,6 @@ def _load_vlm():
     if _vlm_model is not None:
         return _vlm_model, _vlm_processor
 
-    print("[TIMESTAMP] Loading Qwen2.5-VL-7B-Instruct model...")
-    print("[TIMESTAMP] First run will download ~15GB. This is a one-time operation.")
-
     try:
         import torch
         from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
@@ -41,7 +38,6 @@ def _load_vlm():
         return None, None
 
     try:
-        import torch
         model_name = "Qwen/Qwen2.5-VL-7B-Instruct"
 
         # Try to use GPU — do a quick smoke test to confirm it works
@@ -58,15 +54,32 @@ def _load_vlm():
 
         dtype = torch.bfloat16 if use_cuda else torch.float32
         device_map = "auto" if use_cuda else "cpu"
-        print(f"[TIMESTAMP] Loading model on {'GPU (CUDA)' if use_cuda else 'CPU'}...")
 
+        # Try loading from local cache first (no network calls)
+        try:
+            print(f"[TIMESTAMP] Loading model from cache on {'GPU' if use_cuda else 'CPU'}...")
+            _vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+                model_name,
+                torch_dtype=dtype,
+                device_map=device_map,
+                local_files_only=True,
+            )
+            _vlm_processor = AutoProcessor.from_pretrained(model_name, local_files_only=True)
+            print("[TIMESTAMP] Model loaded from cache.")
+            return _vlm_model, _vlm_processor
+        except Exception:
+            pass  # Not cached yet — download below
+
+        # First time: download from HuggingFace Hub
+        print("[TIMESTAMP] Model not cached — downloading (~15 GB, one-time)...")
+        print(f"[TIMESTAMP] Loading on {'GPU (CUDA)' if use_cuda else 'CPU'}...")
         _vlm_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             model_name,
             torch_dtype=dtype,
             device_map=device_map,
         )
         _vlm_processor = AutoProcessor.from_pretrained(model_name)
-        print("[TIMESTAMP] Model loaded successfully.")
+        print("[TIMESTAMP] Model downloaded and loaded successfully.")
         return _vlm_model, _vlm_processor
     except Exception as e:
         print(f"[ERROR] Failed to load VLM: {e}")
