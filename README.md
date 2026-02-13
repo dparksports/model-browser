@@ -1,8 +1,8 @@
-# 🤖 Install Models & Downloader
+# Evaluate Whisper Models
 
-**Discovery, benchmarks, and smart GPU fit — 100% offline.**
+**Locally benchmarking Whisper models on challenging noisy outdoor meeting recordings.**
 
-A powerful CLI tool to browse, analyze, and download the best local LLMs (GGUF format) from HuggingFace. It bridges the gap between raw file listings and informed decision-making by providing capability insights, hardware compatibility checks, and benchmark comparisons directly in your terminal.
+A powerful CLI tool to browse, download, and **evaluate the accuracy** of local Whisper models (GGUF format). It is specifically designed to stress-test models on difficult, real-world audio ("field recordings") to determine which versions can successfully detect speech amidst noise.
 
 ## Key Features
 
