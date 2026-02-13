@@ -19,6 +19,39 @@ import os
 import sys
 
 # ---------------------------------------------------------------------------
+# Default transcript directory
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TRANSCRIPT_DIR = os.path.join(
+    os.path.expanduser("~"), "AppData", "Roaming", "LongAudioApp", "Transcripts"
+)
+
+_CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last_model")
+
+
+def _load_last_model():
+    """Load the last-used model alias from .last_model, or None."""
+    try:
+        if os.path.isfile(_CONFIG_FILE):
+            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            alias = data.get("model")
+            if alias and alias in _gguf_models:
+                return alias
+    except Exception:
+        pass
+    return None
+
+
+def _save_last_model(alias):
+    """Persist the chosen model alias to .last_model."""
+    try:
+        with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"model": alias}, f)
+    except Exception:
+        pass
+
+# ---------------------------------------------------------------------------
 # GGUF Model Registry (HuggingFace repos)
 # ---------------------------------------------------------------------------
 
@@ -43,7 +76,165 @@ _gguf_models = {
         "bartowski/gemma-2-2b-it-GGUF",
         "gemma-2-2b-it-Q4_K_M.gguf",
     ),
+    # Extended catalog (matches model_browser.py)
+    "qwen2.5-0.5b": (
+        "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    ),
+    "qwen2.5-1.5b": (
+        "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+        "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    ),
+    "qwen2.5-7b": (
+        "Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "qwen2.5-7b-instruct-q4_k_m.gguf",
+    ),
+    "gemma-2-9b": (
+        "bartowski/gemma-2-9b-it-GGUF",
+        "gemma-2-9b-it-Q4_K_M.gguf",
+    ),
+    "deepseek-r1-8b": (
+        "bartowski/DeepSeek-R1-Distill-Llama-8B-GGUF",
+        "DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf",
+    ),
+    "qwen2.5-14b": (
+        "Qwen/Qwen2.5-14B-Instruct-GGUF",
+        "qwen2.5-14b-instruct-q4_k_m.gguf",
+    ),
+    "phi-4-14b": (
+        "bartowski/phi-4-GGUF",
+        "phi-4-Q4_K_M.gguf",
+    ),
+    "gemma-2-27b": (
+        "bartowski/gemma-2-27b-it-GGUF",
+        "gemma-2-27b-it-Q4_K_M.gguf",
+    ),
+    "qwen2.5-32b": (
+        "Qwen/Qwen2.5-32B-Instruct-GGUF",
+        "qwen2.5-32b-instruct-q4_k_m.gguf",
+    ),
+    "deepseek-r1-32b": (
+        "bartowski/DeepSeek-R1-Distill-Qwen-32B-GGUF",
+        "DeepSeek-R1-Distill-Qwen-32B-Q4_K_M.gguf",
+    ),
+    "mixtral-8x7b": (
+        "TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF",
+        "mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf",
+    ),
+    "llama-3.1-70b": (
+        "bartowski/Meta-Llama-3.1-70B-Instruct-GGUF",
+        "Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf",
+    ),
+    "deepseek-r1-70b": (
+        "bartowski/DeepSeek-R1-Distill-Llama-70B-GGUF",
+        "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    ),
+    # Unsloth Dynamic 2.0 quantisations
+    "unsloth-qwen2.5-1.5b": (
+        "unsloth/Qwen2.5-1.5B-Instruct-GGUF",
+        "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-phi-3-mini": (
+        "unsloth/Phi-3-mini-4k-instruct-GGUF",
+        "Phi-3-mini-4k-instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-llama-3.1-8b": (
+        "unsloth/Meta-Llama-3.1-8B-Instruct-GGUF",
+        "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-qwen2.5-7b": (
+        "unsloth/Qwen2.5-7B-Instruct-GGUF",
+        "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-gemma-2-9b": (
+        "unsloth/gemma-2-9b-it-GGUF",
+        "gemma-2-9b-it-Q4_K_M.gguf",
+    ),
+    "unsloth-deepseek-r1-8b": (
+        "unsloth/DeepSeek-R1-Distill-Llama-8B-GGUF",
+        "DeepSeek-R1-Distill-Llama-8B-Q4_K_M.gguf",
+    ),
+    "unsloth-phi-4-14b": (
+        "unsloth/phi-4-GGUF",
+        "phi-4-Q4_K_M.gguf",
+    ),
+    "unsloth-qwen2.5-14b": (
+        "unsloth/Qwen2.5-14B-Instruct-GGUF",
+        "Qwen2.5-14B-Instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-qwen2.5-32b": (
+        "unsloth/Qwen2.5-32B-Instruct-GGUF",
+        "Qwen2.5-32B-Instruct-Q4_K_M.gguf",
+    ),
+    "unsloth-deepseek-r1-70b": (
+        "unsloth/DeepSeek-R1-Distill-Llama-70B-GGUF",
+        "DeepSeek-R1-Distill-Llama-70B-Q4_K_M.gguf",
+    ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Interactive model picker — shows only already-downloaded models
+# ---------------------------------------------------------------------------
+
+def _find_downloaded_models():
+    """Scan the model registry and return a list of (alias, repo, file, path)
+    for every model that is already present in the HuggingFace cache."""
+    downloaded = []
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return downloaded
+
+    for alias, (repo, filename) in _gguf_models.items():
+        try:
+            path = try_to_load_from_cache(repo_id=repo, filename=filename)
+            if path and isinstance(path, str) and os.path.isfile(path):
+                downloaded.append((alias, repo, filename, path))
+        except Exception:
+            pass
+    return downloaded
+
+
+def _pick_model_interactive():
+    """Display downloaded models and let the user pick one.
+
+    Returns the chosen model alias, or None if cancelled.
+    """
+    downloaded = _find_downloaded_models()
+    if not downloaded:
+        print("\n[WARNING] No models are downloaded yet.")
+        print("  Run model_browser.py to download a model first:")
+        print("    python model_browser.py")
+        return None
+
+    print("\n" + "=" * 60)
+    print("  Downloaded Models — pick one to use")
+    print("=" * 60)
+    for i, (alias, repo, filename, path) in enumerate(downloaded, 1):
+        tag = " ⚡" if alias.startswith("unsloth-") else ""
+        print(f"  {i:>3}.  {alias}{tag}")
+        print(f"        {filename}")
+    print("=" * 60)
+
+    while True:
+        try:
+            raw = input(f"\nSelect model (1-{len(downloaded)}), or 'q' to quit: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        if raw.lower() in ("q", "quit", "exit"):
+            return None
+        try:
+            choice = int(raw)
+        except ValueError:
+            print(f"  Please enter a number between 1 and {len(downloaded)}.")
+            continue
+        if 1 <= choice <= len(downloaded):
+            alias = downloaded[choice - 1][0]
+            print(f"  → Selected: {alias}")
+            return alias
+        print(f"  Please enter a number between 1 and {len(downloaded)}.")
 
 # ---------------------------------------------------------------------------
 # Local LLM loader (llama-cpp-python) with GPU → CPU fallback
@@ -57,8 +248,22 @@ def _load_llm(model_name=None):
     """Load (or return cached) a GGUF model for local inference."""
     global _cached_llm, _cached_llm_name
 
+    if model_name == "pick":
+        model_name = _pick_model_interactive()
+        if not model_name:
+            return None
+
     if not model_name or model_name not in _gguf_models:
-        model_name = "phi-3-mini"
+        # Try loading last-used model before falling back to phi-3-mini
+        saved = _load_last_model()
+        if saved:
+            print(f"[LOAD] Using saved model: {saved}")
+            model_name = saved
+        else:
+            model_name = "phi-3-mini"
+
+    # Remember this choice for next time
+    _save_last_model(model_name)
 
     # Return cached if same model
     if _cached_llm is not None and _cached_llm_name == model_name:
@@ -451,18 +656,25 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  # Local GGUF model (auto-downloads from HuggingFace)
+  # Use default transcript directory (~\\AppData\\Roaming\\LongAudioApp\\Transcripts\\)
+  python detect_meetings.py --provider local --model pick
+
+  # Specify a custom directory
   python detect_meetings.py --dir "C:\\Transcripts" --provider local --model phi-3-mini
 
   # Google Gemini cloud API
   python detect_meetings.py --dir "C:\\Transcripts" --provider gemini --api-key YOUR_KEY
 
   # Resume a previous scan (skip already-checked files)
-  python detect_meetings.py --dir "C:\\Transcripts" --provider local --skip-checked
+  python detect_meetings.py --provider local --skip-checked
 
 Available local models: """ + ", ".join(sorted(_gguf_models.keys())),
     )
-    parser.add_argument("--dir", required=True, help="Directory containing transcript files")
+    parser.add_argument(
+        "--dir",
+        default=_DEFAULT_TRANSCRIPT_DIR,
+        help=f"Directory containing transcript files (default: {_DEFAULT_TRANSCRIPT_DIR})",
+    )
     parser.add_argument(
         "--provider",
         choices=["local", "gemini", "openai", "claude"],
@@ -473,7 +685,8 @@ Available local models: """ + ", ".join(sorted(_gguf_models.keys())),
         "--model",
         default="phi-3-mini",
         help="Local GGUF model preset (default: phi-3-mini). "
-        f"Choices: {', '.join(sorted(_gguf_models.keys()))}",
+        "Use 'pick' to interactively choose from downloaded models. "
+        f"Presets: {', '.join(sorted(_gguf_models.keys()))}",
     )
     parser.add_argument("--api-key", help="API key for cloud provider (gemini/openai/claude)")
     parser.add_argument("--cloud-model", help="Override cloud model name (e.g. gpt-4o, gemini-2.0-flash)")

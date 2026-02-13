@@ -25,53 +25,76 @@ This creates a `meeting` virtual environment and installs:
 | `openai` | Gemini & OpenAI cloud APIs |
 | `anthropic` | Claude cloud API |
 
-## Usage
+---
 
-Activate the environment first:
+## Quick Start
+
 ```powershell
+# 1. Activate the environment
 .\meeting\Scripts\activate
+
+# 2. Browse & download a model (live from HuggingFace)
+python model_browser.py
+
+# 3. Run detection with interactive model picker
+python detect_meetings.py --model pick
 ```
 
-### Local LLM (GPU-accelerated, no API key needed)
+On subsequent runs, your model selection is remembered automatically.
+
+---
+
+## Model Browser
+
+Fetches the most popular GGUF models **live from HuggingFace** — always up-to-date, no hardcoded lists.
+
+| Command | What it does |
+|---|---|
+| `python model_browser.py` | Top 10 ⚡Unsloth + top 10 community models |
+| `python model_browser.py --top 20` | Show top 20 per section |
+| `python model_browser.py --search "deepseek"` | Free-form search for any model |
+| `python model_browser.py --gpu 5090` | Show GPU info alongside results |
+| `python model_browser.py --list` | Print table and exit (no download) |
+
+Select a model to see its available GGUF quantisations (Q4_K_M recommended) and download.
+
+---
+
+## Detecting Meetings
+
+### Default Transcript Directory
+```
+%APPDATA%\LongAudioApp\Transcripts\
+```
+Override with `--dir "C:\MyFolder"` when needed.
+
+### Local LLM (GPU-accelerated, no API key)
 ```powershell
-python detect_meetings.py --dir "C:\Transcripts" --provider local --model phi-3-mini
+python detect_meetings.py --model pick       # interactive picker
+python detect_meetings.py --model phi-3-mini  # specific model
+python detect_meetings.py                     # uses last picked model
 ```
-
-Available local models: `gemma-2-2b`, `llama-3.1-8b`, `mistral-7b`, `phi-3-mini` (default), `qwen2-7b`
-
-Models are auto-downloaded from HuggingFace on first use.
 
 ### Cloud Providers
 ```powershell
-# Google Gemini
-python detect_meetings.py --dir "C:\Transcripts" --provider gemini --api-key YOUR_KEY
-
-# OpenAI
-python detect_meetings.py --dir "C:\Transcripts" --provider openai --api-key YOUR_KEY
-
-# Anthropic Claude
-python detect_meetings.py --dir "C:\Transcripts" --provider claude --api-key YOUR_KEY
+python detect_meetings.py --provider gemini --api-key YOUR_KEY
+python detect_meetings.py --provider openai --api-key YOUR_KEY
+python detect_meetings.py --provider claude --api-key YOUR_KEY
 ```
 
 ### Resume a Scan
 ```powershell
-python detect_meetings.py --dir "C:\Transcripts" --provider local --skip-checked
+python detect_meetings.py --skip-checked
 ```
 
-This skips files already present in the `detection_report.json` from a prior run.
+---
 
 ## How It Works
 
-1. **Discovery** — recursively finds all `*_transcript*.txt` files in `--dir`  
-2. **Heuristic pre-filter** — if >85% of lines are identical, it's classified as
-   hallucinated without calling the LLM  
-3. **LLM classification** — sends the transcript to the chosen LLM with a prompt
-   asking it to return `{has_meeting, confidence, reason}`  
-4. **Report** — saves `detection_report.json` in `--dir` with all results
-
-## Output
-
-Results are printed to the console and saved as `detection_report.json`:
+1. **Discovery** — recursively finds `*_transcript*.txt` files in `--dir`
+2. **Heuristic pre-filter** — if >85% of lines are identical → hallucinated
+3. **LLM classification** — sends transcript to LLM → `{has_meeting, confidence, reason}`
+4. **Report** — saves `detection_report.json` with all results
 
 ```json
 [
@@ -79,7 +102,7 @@ Results are printed to the console and saved as `detection_report.json`:
     "file": "C:\\Audio\\call_transcript_large-v3.txt",
     "has_meeting": true,
     "confidence": 92,
-    "reason": "Contains varied conversation with multiple speakers discussing project plans"
+    "reason": "Contains varied conversation with multiple speakers"
   }
 ]
 ```
