@@ -393,73 +393,99 @@ def run_extract_timestamps(file_path, num_frames=5, crop_ratio=0.08):
 
 def _parse_timestamp_parts(timestamp_text):
     """
-    Parse a raw timestamp string into (date_str, time_str) filesystem-safe parts.
-    Handles formats like '2026/02/01 07:25:16 am SUN', '2024-01-15 10:30:22', etc.
-    Returns (date, time) e.g. ('2026-02-01', '07-25-16') or (None, sanitized_full).
+    Parse a raw timestamp string into (date_str, time_str, day_of_week) filesystem-safe parts.
+    Handles formats like '10/21/2025 09:06:03 am TUE', '2024-01-15 10:30:22', etc.
+    Returns (date, time, day) e.g. ('2025-10-21', '09-06-03am', 'TUE') or (None, sanitized_full, None).
     """
     if not timestamp_text:
-        return None, None
+        return None, None, None
     import re
     s = timestamp_text.strip()
 
-    # Try to match: DATE TIME [am/pm] [day-of-week]
-    # Common patterns: YYYY/MM/DD HH:MM:SS am DAY, YYYY-MM-DD HH:MM:SS, etc.
+    # Try MM/DD/YYYY or DD/MM/YYYY format first (US-style: MM/DD/YYYY)
     m = re.match(
-        r'(\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2})\s+'   # date
-        r'(\d{1,2}[:\-]\d{2}(?:[:\-]\d{2})?)'         # time (HH:MM or HH:MM:SS)
-        r'(?:\s*(am|pm))?'                              # optional am/pm
-        r'(?:\s*\w+)?',                                 # optional day name
+        r'(\d{1,2})[/\-\.](\d{1,2})[/\-\.](\d{4})\s+'  # date MM/DD/YYYY
+        r'(\d{1,2}[:\-]\d{2}(?:[:\-]\d{2})?)'             # time
+        r'(?:\s*(am|pm))?'                                  # optional am/pm
+        r'(?:\s*([A-Za-z]{2,3}))?',                         # optional day name (TUE, SUN, etc.)
         s, re.IGNORECASE
     )
     if m:
-        date_part = re.sub(r'[/\.]', '-', m.group(1))     # normalize to YYYY-MM-DD
-        time_part = m.group(2).replace(':', '-')           # HH-MM or HH-MM-SS
+        month, day, year = m.group(1), m.group(2), m.group(3)
+        date_part = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        time_part = m.group(4).replace(':', '-')
+        ampm = m.group(5)
+        if ampm:
+            time_part += ampm.lower()
+        day_of_week = m.group(6).upper() if m.group(6) else None
+        return date_part, time_part, day_of_week
+
+    # Try YYYY/MM/DD or YYYY-MM-DD format
+    m = re.match(
+        r'(\d{4}[/\-\.]\d{1,2}[/\-\.]\d{1,2})\s+'   # date YYYY-MM-DD
+        r'(\d{1,2}[:\-]\d{2}(?:[:\-]\d{2})?)'         # time
+        r'(?:\s*(am|pm))?'                              # optional am/pm
+        r'(?:\s*([A-Za-z]{2,3}))?',                     # optional day name
+        s, re.IGNORECASE
+    )
+    if m:
+        date_part = re.sub(r'[/\.]', '-', m.group(1))
+        time_part = m.group(2).replace(':', '-')
         ampm = m.group(3)
         if ampm:
-            time_part += ampm.lower()                      # e.g. 07-00-01am
-        return date_part, time_part
+            time_part += ampm.lower()
+        day_of_week = m.group(4).upper() if m.group(4) else None
+        return date_part, time_part, day_of_week
 
     # Fallback: just sanitize the whole thing
     s = re.sub(r'[/\.]', '-', s)
     s = s.replace(':', '-')
     s = re.sub(r'\s+', '_', s)
     s = re.sub(r'[<>:"/\\|?*]', '', s)
-    return None, s if s else None
+    return None, s if s else None, None
 
 
 def _build_rename(start_text, end_text, camera_label=None):
     """
     Build a compact filename from start/end timestamps and optional camera label.
-    Format: CAMERA-DATE_STARTTIME_to_ENDTIME.mp4
-    E.g. 'driveway1104-2026-02-01_07-00am_to_07-25am.mp4'
+    Format: date-day_of_week-start_time-end_time-camera_location.mp4
+    E.g. '2025-10-21-TUE-09-06-03am-09-12-00am-driveway1104.mp4'
     """
-    start_date, start_time = _parse_timestamp_parts(start_text)
-    end_date, end_time = _parse_timestamp_parts(end_text)
+    start_date, start_time, start_day = _parse_timestamp_parts(start_text)
+    end_date, end_time, end_day = _parse_timestamp_parts(end_text)
 
-    # Pick the date (prefer start, fall back to end)
+    # Pick the date and day of week (prefer start, fall back to end)
     date = start_date or end_date
+    day_of_week = start_day or end_day
 
-    # Build time portion
-    if date and start_time and end_time:
-        name = f"{date}_{start_time}_to_{end_time}"
-    elif date and start_time:
-        name = f"{date}_{start_time}"
-    elif date and end_time:
-        name = f"{date}_{end_time}"
-    elif start_time and end_time:
-        name = f"{start_time}_to_{end_time}"
-    elif start_time:
-        name = f"{start_time}"
-    elif end_time:
-        name = f"{end_time}"
-    else:
-        return None
+    # Build name parts list
+    parts = []
 
-    # Prepend camera label if available
+    # Date
+    if date:
+        parts.append(date)
+
+    # Day of week
+    if day_of_week:
+        parts.append(day_of_week)
+
+    # Start time
+    if start_time:
+        parts.append(start_time)
+
+    # End time
+    if end_time:
+        parts.append(end_time)
+
+    # Camera label (at the end)
     label = _sanitize_label(camera_label)
     if label:
-        return f"{label}-{name}.mp4"
-    return f"{name}.mp4"
+        parts.append(label)
+
+    if not parts or (not start_time and not end_time):
+        return None
+
+    return "-".join(parts) + ".mp4"
 
 
 def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None, do_rename=True):
@@ -496,6 +522,37 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
         print(f"[BATCH] Files will be renamed after timestamp extraction.")
     else:
         print(f"[BATCH] Rename disabled (--no-rename). Files will not be renamed.")
+
+    # Resume support: skip files already recorded in the CSV
+    csv_dir = os.getcwd()
+    all_csv_path = os.path.join(csv_dir, "batch_timestamps.csv")
+    already_done = set()
+    if os.path.exists(all_csv_path):
+        try:
+            with open(all_csv_path, "r", newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    # Track by both original and new filename + folder
+                    folder = row.get("folder", "")
+                    orig = row.get("original_file", "")
+                    new = row.get("new_file", "")
+                    if orig:
+                        already_done.add(os.path.join(folder, orig))
+                    if new and new != orig:
+                        already_done.add(os.path.join(folder, new))
+        except Exception as e:
+            print(f"[BATCH] Warning: could not read existing CSV for resume: {e}")
+
+    before_skip = len(mp4_files)
+    mp4_files = [f for f in mp4_files if os.path.abspath(f) not in already_done]
+    skipped = before_skip - len(mp4_files)
+
+    if skipped:
+        print(f"[BATCH] Resuming — skipped {skipped} already-processed file(s)")
+
+    if not mp4_files:
+        print(f"[BATCH] All files already processed. Nothing to do.")
+        return
 
     # Pre-load VLM once for all videos
     model, processor = _load_vlm()
@@ -609,22 +666,25 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
     ]
 
     def _write_csv(path, rows):
-        with open(path, "w", newline="", encoding="utf-8") as f:
+        file_exists = os.path.exists(path)
+        with open(path, "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
+            if not file_exists:
+                writer.writeheader()
             writer.writerows(rows)
 
-    # Save all 3 CSVs
+    # Save all 3 CSVs to current working directory
+    csv_dir = os.getcwd()
     try:
-        all_csv = os.path.join(folder_path, "batch_timestamps.csv")
+        all_csv = os.path.join(csv_dir, "batch_timestamps.csv")
         _write_csv(all_csv, all_results)
         print(f"\n[BATCH] CSV (all)       → {all_csv} ({len(all_results)} rows)")
 
-        ok_csv = os.path.join(folder_path, "batch_succeeded.csv")
+        ok_csv = os.path.join(csv_dir, "batch_succeeded.csv")
         _write_csv(ok_csv, succeeded)
         print(f"[BATCH] CSV (succeeded) → {ok_csv} ({len(succeeded)} rows)")
 
-        fail_csv = os.path.join(folder_path, "batch_failed.csv")
+        fail_csv = os.path.join(csv_dir, "batch_failed.csv")
         _write_csv(fail_csv, failed)
         print(f"[BATCH] CSV (failed)    → {fail_csv} ({len(failed)} rows)")
     except Exception as e:
