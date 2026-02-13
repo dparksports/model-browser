@@ -585,22 +585,39 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
         # Cleanup temp frames
         _cleanup_frames(frames)
 
-    # Save CSV report
-    csv_path = os.path.join(folder_path, "batch_timestamps.csv")
-    try:
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=[
-                "original_file", "new_file", "camera_label", "folder",
-                "start_timestamp", "end_timestamp",
-                "duration_sec", "renamed", "error"
-            ])
+    # Split results into succeeded and failed
+    succeeded = [r for r in all_results if not r.get("error")]
+    failed = [r for r in all_results if r.get("error")]
+
+    fieldnames = [
+        "original_file", "new_file", "camera_label", "folder",
+        "start_timestamp", "end_timestamp",
+        "duration_sec", "renamed", "error"
+    ]
+
+    def _write_csv(path, rows):
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(all_results)
-        print(f"\n[BATCH] CSV saved → {csv_path}")
+            writer.writerows(rows)
+
+    # Save all 3 CSVs
+    try:
+        all_csv = os.path.join(folder_path, "batch_timestamps.csv")
+        _write_csv(all_csv, all_results)
+        print(f"\n[BATCH] CSV (all)       → {all_csv} ({len(all_results)} rows)")
+
+        ok_csv = os.path.join(folder_path, "batch_succeeded.csv")
+        _write_csv(ok_csv, succeeded)
+        print(f"[BATCH] CSV (succeeded) → {ok_csv} ({len(succeeded)} rows)")
+
+        fail_csv = os.path.join(folder_path, "batch_failed.csv")
+        _write_csv(fail_csv, failed)
+        print(f"[BATCH] CSV (failed)    → {fail_csv} ({len(failed)} rows)")
     except Exception as e:
         print(f"[ERROR] Failed to write CSV: {e}")
 
-    print(f"[BATCH] Done — processed {len(mp4_files)} videos, renamed {renamed_count}.")
+    print(f"[BATCH] Done — processed {len(mp4_files)} videos, renamed {renamed_count}, failed {len(failed)}.")
 
 
 def _cleanup_frames(frames):
