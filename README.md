@@ -118,10 +118,23 @@ To grade the _quality_ of the transcripts (coherence, grammar, recoverability), 
 python assess_quality.py --limit 0
 ```
 
-**Key Findings:**
+**Key Findings: The Discovery vs. Quality Trade-off**
 
-- **Quality vs Discovery**: Larger models like `large-v3` produce slightly better text (Score: 5.1/10) _when_ they work, but they fail to detect meetings 70% of the time in noisy/outdoor conditions.
-- **Best Balance**: **`base.en`** is the recommended model. It has a high **Discovery Rate (58%)** and a very competitive **Quality Score (4.2/10)**. It finds the meetings others miss.
+New users should understand why different models excel at different tasks:
+
+1.  **Discovery (Finding the Meeting)**:
+    - **Champion**: **`base.en`**
+    - **Why**: It is highly sensitive and "optimistic." It rarely filters out quiet or distant audio, meaning it finds 58% of meetings that larger models miss.
+    - **Use Case**: Always start here to ensure you don't miss any conversations.
+
+2.  **Quality (Transcription Fidelity)**:
+    - **Champion**: **`large-v3`**
+    - **Why**: _If_ it detects speech, it produces the most coherent and grammatically correct text (Score: 5.1/10). However, it is very aggressive at filtering "noise," meaning it completely ignores 70% of the meetings in this dataset (Discovery Rate: 31%).
+    - **Use Case**: Use this _only_ on files that `base.en` has already flagged as containing speech, if you need slightly better punctuation/grammar.
+
+**Recommendation:**
+
+For most users, **`base.en`** is the only model you need. It offers the **best balance** (High Discovery + Good Quality). Only use `large-v3` as a second pass on confirmed files.
 
 ## Installation
 
