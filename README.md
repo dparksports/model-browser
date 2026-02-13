@@ -120,6 +120,16 @@ python assess_quality.py --limit 0
 
 **Key Findings: The Discovery vs. Quality Trade-off**
 
+### Benchmark Results (Noisy Outdoor Audio)
+
+| Model       | Discovery Rate (Finding Meetings) | Quality Score (0-10) | Verdict                                |
+| :---------- | :-------------------------------- | :------------------- | :------------------------------------- |
+| **base.en** | **58%**                           | 4.2                  | 🏆 **Best Overall**                    |
+| large-v3    | 31%                               | **5.1** (Best Text)  | High fidelity, but misses 2/3 meetings |
+| large-v1    | 44%                               | 4.4                  | Reliable backup choice                 |
+| large-v2    | 3%                                | 4.6                  | ❌ Misses almost everything            |
+| turbo       | 8%                                | 1.8                  | ❌ Poor sensitivity & quality          |
+
 New users should understand why different models excel at different tasks:
 
 1.  **Discovery (Finding the Meeting)**:
