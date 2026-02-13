@@ -9,13 +9,14 @@ output from a speech-recognition model.
 
 Usage::
 
-    python detect_meetings.py --dir "C:\\Transcripts" --provider local --model phi-3-mini
-    python detect_meetings.py --dir "C:\\Transcripts" --provider gemini --api-key KEY
+    python find_meetings.py --dir "C:\\Transcripts" --provider local --model phi-3-mini
+    python find_meetings.py --dir "C:\\Transcripts" --provider gemini --api-key KEY
 """
 
 import argparse
 import json
 import os
+import re
 import sys
 
 # ---------------------------------------------------------------------------
@@ -472,7 +473,7 @@ def _analyze_claude(prompt, api_key, model="claude-sonnet-4-20250514"):
 
 
 # ---------------------------------------------------------------------------
-# Core: Detect Meetings
+# Core: Find Meetings
 # ---------------------------------------------------------------------------
 
 MEETING_DETECTION_PROMPT = """\
@@ -500,7 +501,29 @@ Transcript:
 JSON:"""
 
 
-def detect_meetings(
+def _print_whisper_breakdown(transcript_files):
+    """Print a breakdown of transcript count by Whisper model version."""
+    from collections import Counter
+    model_counts = Counter()
+    for fpath in transcript_files:
+        basename = os.path.basename(fpath)
+        match = re.match(r".*_transcript_(.*)\\.txt$", basename)
+        if match:
+            model_counts[match.group(1)] += 1
+        else:
+            model_counts["unknown"] += 1
+
+    print(f"\n{'=' * 50}")
+    print("  Transcripts by Whisper Model")
+    print(f"{'=' * 50}")
+    for model, count in sorted(model_counts.items(), key=lambda x: -x[1]):
+        print(f"  {model:<20} {count:>5} files")
+    print(f"  {'─' * 30}")
+    print(f"  {'TOTAL':<20} {len(transcript_files):>5} files")
+    print(f"{'=' * 50}\n")
+
+
+def find_meetings(
     directory,
     provider="local",
     model_name=None,
@@ -512,7 +535,7 @@ def detect_meetings(
 ):
     """
     Scan all *_transcript*.txt files and classify each as real meeting vs.
-    hallucinated via an LLM.  Saves detection_report.json for resumable scans.
+    hallucinated via an LLM.  Saves detection_report.csv for resumable scans.
     """
     # -- Collect transcript files ------------------------------------------------
     transcript_files = []
@@ -535,8 +558,11 @@ def detect_meetings(
     total = len(transcript_files)
     print(f"[DETECT] Found {total} transcript files to analyze")
     if total == 0:
-        print(json.dumps({"status": "complete", "action": "detect_meetings", "results": []}))
+        print(json.dumps({"status": "complete", "action": "find_meetings", "results": []}))
         return
+
+    # -- Print per-Whisper-model breakdown ---------------------------------------
+    _print_whisper_breakdown(transcript_files)
 
     results = []
     meetings_found = 0
@@ -544,16 +570,29 @@ def detect_meetings(
     # -- Skip previously-checked files if requested ------------------------------
     previously_checked = set()
     if skip_checked:
-        report_path = os.path.join(output_dir, "detection_report.json")
+        report_path = os.path.join(output_dir, "detection_report.csv")
         if os.path.exists(report_path):
             try:
-                with open(report_path, "r", encoding="utf-8") as rf:
-                    prev_results = json.load(rf)
-                    for r in prev_results:
-                        previously_checked.add(os.path.abspath(r.get("file", "")))
-                    results.extend(prev_results)
-                    meetings_found += sum(1 for r in prev_results if r.get("has_meeting"))
-                    print(f"[DETECT] Loaded {len(prev_results)} previously checked files, skipping them")
+                import csv as _csv
+                with open(report_path, "r", newline="", encoding="utf-8") as rf:
+                    reader = _csv.DictReader(rf)
+                    for row in reader:
+                        fpath_prev = os.path.abspath(row.get("Full Path", ""))
+                        previously_checked.add(fpath_prev)
+                        has_meeting = row.get("Has Meeting", "").strip().lower() == "yes"
+                        conf_str = row.get("Confidence", "0").replace("%", "").strip()
+                        try:
+                            confidence = int(conf_str)
+                        except ValueError:
+                            confidence = 0
+                        results.append({
+                            "file": fpath_prev,
+                            "has_meeting": has_meeting,
+                            "confidence": confidence,
+                            "reason": row.get("Reason", ""),
+                        })
+                    meetings_found += sum(1 for r in results if r.get("has_meeting"))
+                    print(f"[DETECT] Loaded {len(results)} previously checked files, skipping them")
             except Exception as ex:
                 print(f"[WARNING] Could not load previous report: {ex}")
 
@@ -562,7 +601,7 @@ def detect_meetings(
         print(f"[DETECT] {total} remaining files to analyze (after skipping)")
         if total == 0:
             print("[DETECT] All files already checked!")
-            print(json.dumps({"status": "complete", "action": "detect_meetings", "results": results}))
+            print(json.dumps({"status": "complete", "action": "find_meetings", "results": results}))
             # Still output summary if meaningful results exist
             _write_summary(output_dir, results)
             _write_csv(output_dir, results)
@@ -687,14 +726,38 @@ def detect_meetings(
     _write_summary(output_dir, results)
     _write_csv(output_dir, results)
 
-    # -- Save report -------------------------------------------------------------
-    report_path = os.path.join(output_dir, "detection_report.json")
+    # -- Save report as sorted CSV -----------------------------------------------
+    _write_detection_report_csv(output_dir, results)
+
+
+def _write_detection_report_csv(directory, results):
+    """Write ALL detection results to detection_report.csv, sorted by
+    has_meeting (Yes first) then by confidence (descending).
+    Columns: Has Meeting, Confidence, Reason, Full Path"""
+    import csv
+    report_path = os.path.join(directory, "detection_report.csv")
+
+    # Sort: meetings first (True > False), then by confidence descending
+    sorted_results = sorted(
+        results,
+        key=lambda r: (r.get("has_meeting", False), r.get("confidence", 0)),
+        reverse=True,
+    )
+
     try:
-        with open(report_path, "w", encoding="utf-8") as rf:
-            json.dump(results, rf, indent=2)
-        print(f"\n[DETECT] Detailed JSON report saved to {report_path}")
+        with open(report_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Has Meeting", "Confidence", "Reason", "Full Path"])
+            for r in sorted_results:
+                writer.writerow([
+                    "Yes" if r.get("has_meeting") else "No",
+                    f"{r['confidence']}%",
+                    r["reason"],
+                    r["file"],
+                ])
+        print(f"\n[DETECT] Detection report saved to {report_path} ({len(sorted_results)} entries)")
     except Exception as ex:
-        print(f"[WARNING] Could not save report: {ex}")
+        print(f"[WARNING] Could not save detection report: {ex}")
 
 
 def _write_csv(directory, results):
@@ -775,16 +838,16 @@ def main():
         epilog="""\
 Examples:
   # Use default transcript directory (~\\AppData\\Roaming\\LongAudioApp\\Transcripts\\)
-  python detect_meetings.py --provider local --model pick
+  python find_meetings.py --provider local --model pick
 
   # Specify a custom directory
-  python detect_meetings.py --dir "C:\\Transcripts" --provider local --model phi-3-mini
+  python find_meetings.py --dir "C:\\Transcripts" --provider local --model phi-3-mini
 
   # Google Gemini cloud API
-  python detect_meetings.py --dir "C:\\Transcripts" --provider gemini --api-key YOUR_KEY
+  python find_meetings.py --dir "C:\\Transcripts" --provider gemini --api-key YOUR_KEY
 
   # Resume a previous scan (skip already-checked files)
-  python detect_meetings.py --provider local --skip-checked
+  python find_meetings.py --provider local --skip-checked
 
   # Install more models:
   python install_models.py
@@ -813,7 +876,7 @@ Examples:
     parser.add_argument(
         "--skip-checked",
         action="store_true",
-        help="Skip files already analysed in a previous detection_report.json",
+        help="Skip files already analysed in a previous detection_report.csv",
     )
     parser.add_argument(
         "--output",
@@ -831,7 +894,7 @@ Examples:
             print(f"[ERROR] Could not create output directory: {e}")
             return
 
-    detect_meetings(
+    find_meetings(
         directory=args.dir,
         provider=args.provider,
         model_name=args.model,

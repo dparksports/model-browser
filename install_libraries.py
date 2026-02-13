@@ -398,7 +398,7 @@ def main():
             print()
 
     print("Quick test:")
-    cprint("  python detect_meetings.py --help", C.CYAN)
+    cprint("  python find_meetings.py --help", C.CYAN)
     print()
 
 

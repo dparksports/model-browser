@@ -110,7 +110,7 @@ Inside the browser:
 To detect meetings in your transcripts, run:
 
 ```bash
-python detect_meetings.py --provider local --model pick
+python find_meetings.py --provider local --model pick
 ```
 
 This will generate two summary files in the transcript directory:

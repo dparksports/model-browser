@@ -8,12 +8,12 @@ from collections import defaultdict
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Compare Whisper model performance based on meeting detection results.",
-        epilog="Example: python compare_models.py --report detection_report.json"
+        epilog="Example: python compare_models.py --report detection_report.csv"
     )
     parser.add_argument(
         "--report",
-        default="detection_report.json",
-        help="Path to the detection report JSON file (default: detection_report.json)",
+        default="detection_report.csv",
+        help="Path to the detection report CSV file (default: detection_report.csv)",
     )
     parser.add_argument(
         "--csv",
@@ -23,12 +23,27 @@ def parse_args():
     return parser.parse_args()
 
 def load_report(filepath):
-    """Load the detection report JSON."""
+    """Load the detection report CSV."""
     if not os.path.exists(filepath):
         print(f"Error: {filepath} not found.")
         return []
-    with open(filepath, "r", encoding="utf-8") as f:
-        return json.load(f)
+    data = []
+    with open(filepath, "r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            has_meeting = row.get("Has Meeting", "").strip().lower() == "yes"
+            conf_str = row.get("Confidence", "0").replace("%", "").strip()
+            try:
+                confidence = int(conf_str)
+            except ValueError:
+                confidence = 0
+            data.append({
+                "file": row.get("Full Path", ""),
+                "has_meeting": has_meeting,
+                "confidence": confidence,
+                "reason": row.get("Reason", ""),
+            })
+    return data
 
 def parse_filename(filepath):
     """

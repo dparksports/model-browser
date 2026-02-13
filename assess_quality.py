@@ -2,7 +2,7 @@
 """
 Transcript Quality Assessor -- Uses local LLM to grade transcript quality.
 
-This script loads "Confirmed Meetings" (from detection_report.json),
+This script loads "Confirmed Meetings" (from detection_report.csv),
 groups the transcripts by audio file, and then asks the local LLM to 
 rate each transcript version on a scale of 0-10.
 """
@@ -12,15 +12,15 @@ import json
 import os
 import sys
 
-# Reuse logic from detect_meetings for model loading
+# Reuse logic from find_meetings for model loading
 # We need to add the current directory to sys.path to import if needed, 
-# but detect_meetings is a script, not a module. 
+# but find_meetings is a script, not a module. 
 # We will replicate the necessary parts or import if possible.
 # For simplicity and robustness, I will inline the minimal LLM loading logic here
 # to avoid dependency issues with the other script's main execution block.
 
 # ---------------------------------------------------------------------------
-# WINDOWS CUDA PATH FIX (Replicated from detect_meetings.py)
+# WINDOWS CUDA PATH FIX (Replicated from find_meetings.py)
 # ---------------------------------------------------------------------------
 try:
     _cuda_dirs = []
@@ -183,18 +183,33 @@ def _assess_transcript(llm, text):
 
 def main():
     parser = argparse.ArgumentParser(description="Assess transcript quality using local LLM.")
-    parser.add_argument("--report", default="detection_report.json", help="Path to detection report")
+    parser.add_argument("--report", default="detection_report.csv", help="Path to detection report")
     parser.add_argument("--limit", type=int, default=0, help="Number of audio segments to assess (0 = all, default: 0)")
     parser.add_argument("--model", help="Override judge model name")
     args = parser.parse_args()
 
-    # 1. Load Detection Report
+    # 1. Load Detection Report (CSV)
     if not os.path.exists(args.report):
         print(f"Report not found: {args.report}")
         return
-        
-    with open(args.report, "r", encoding="utf-8") as f:
-        data = json.load(f)
+
+    import csv as _csv
+    data = []
+    with open(args.report, "r", newline="", encoding="utf-8") as f:
+        reader = _csv.DictReader(f)
+        for row in reader:
+            has_meeting = row.get("Has Meeting", "").strip().lower() == "yes"
+            conf_str = row.get("Confidence", "0").replace("%", "").strip()
+            try:
+                confidence = int(conf_str)
+            except ValueError:
+                confidence = 0
+            data.append({
+                "file": row.get("Full Path", ""),
+                "has_meeting": has_meeting,
+                "confidence": confidence,
+                "reason": row.get("Reason", ""),
+            })
 
     # 2. Group by Audio ID
     from compare_models import parse_filename # Reuse this utility
@@ -221,7 +236,7 @@ def main():
 
     # 4. Load Judge Model
     # 4. Load Judge Model
-    # Check .last_model file created by detect_meetings.py
+    # Check .last_model file created by find_meetings.py
     last_model_file = ".last_model"
     model_to_use = DEFAULT_JUDGE_MODEL
     
