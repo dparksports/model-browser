@@ -41,6 +41,13 @@ Compare local models against commercial giants **without leaving your terminal**
 - Shows exact file sizes and fit status for *each quantization*.
 - Filters out non-GGUF files automatically.
 
+### 6. 🚀 Unsloth Optimization
+The browser prioritizes models from **Unsloth** because they are consistently the best starting point for local AI:
+- **Faster Inference:** Often converted with optimal settings for speed.
+- **High Integrity:** Verified GGUF conversions that minimize perplexity loss.
+- **Broad Compatibility:** Wide range of quantizations (Q4, Q5, Q8, IQ-series) covering most GPU sizes.
+- **Latest Architectures:** Unsloth is frequently first to support new architectures (DeepSeek-R1, Llama-3, etc.).
+
 ## Usage
 
 ```bash
@@ -76,4 +83,4 @@ pip install huggingface_hub
 - Internet connection (for live listings/downloads). Benchmarks and catalog are offline-available.
 
 ## License
-MIT
+[Apache 2.0](LICENSE)
