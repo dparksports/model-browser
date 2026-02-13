@@ -11,8 +11,21 @@ A powerful CLI tool to browse, download, and **evaluate the accuracy** of local 
 | **base.en** | **58%**                           | 4.2                  | 🏆 **Best Overall**                    |
 | large-v3    | 31%                               | **5.1** (Best Text)  | High fidelity, but misses 2/3 meetings |
 | large-v1    | 44%                               | 4.4                  | Reliable backup choice                 |
+| small.en    | 31%                               | 2.9                  | Decent, but `base.en` is better        |
+| tiny.en     | 29%                               | 2.2                  | Fast but low quality                   |
 | large-v2    | 3%                                | 4.6                  | ❌ Misses almost everything            |
 | turbo       | 8%                                | 1.8                  | ❌ Poor sensitivity & quality          |
+
+### English vs. Multilingual Models
+
+For English audio, **always use the `.en` specific models**. They are significantly more sensitive to faint speech than their multilingual counterparts.
+
+| Model          | Discovery Rate |
+| :------------- | :------------- |
+| **medium.en**  | **18.9%**      |
+| medium (multi) | 0.0%           |
+
+**Verdict**: Multilingual models (without `.en`) tend to filter out noisy English speech as "foreign noise" and output silence.
 
 ## Key Features
 
