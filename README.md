@@ -132,6 +132,15 @@ New users should understand why different models excel at different tasks:
     - **Why**: _If_ it detects speech, it produces the most coherent and grammatically correct text (Score: 5.1/10). However, it is very aggressive at filtering "noise," meaning it completely ignores 70% of the meetings in this dataset (Discovery Rate: 31%).
     - **Use Case**: Use this _only_ on files that `base.en` has already flagged as containing speech, if you need slightly better punctuation/grammar.
 
+### Detailed Model Breakdown (For Power Users)
+
+Here is how the top tiers compare for **noisy outdoor audio**:
+
+- **`large-v3` (Score: 5.1/10)**: The "High Fidelity" expert. It produces the best text when it works, but it is extremely sensitive to noise and will aggressively filter out faint speech. **Use only for high-quality recordings.**
+- **`large-v2` (Score: 4.6/10)**: Similar to v3 but significantly prone to hallucination on silence (Discovery Rate: 2.6%). It frequently outputs repetitive garbage instead of silence. **Avoid for this dataset.**
+- **`large-v1` (Score: 4.4/10)**: The "Old Reliable." It has a much better Discovery Rate (44%) than its successors, making it the best "Large" model if you absolutely need the large parameter count.
+- **`turbo` (Score: 1.8/10)**: Optimized for speed, not sensitivity. It performed poorly on this specific challenging dataset (7.7% Discovery).
+
 **Recommendation:**
 
 For most users, **`base.en`** is the only model you need. It offers the **best balance** (High Discovery + Good Quality). Only use `large-v3` as a second pass on confirmed files.
