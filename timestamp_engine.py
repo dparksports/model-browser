@@ -10,10 +10,23 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 import subprocess
 import tempfile
 import shutil
+
+# Tesla dashcam filename pattern: YYYY-MM-DD_HH-MM-SS-<camera>.mp4
+_TESLA_DASHCAM_RE = re.compile(
+    r'^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-(front|back|left_repeater|right_repeater|left_pillar|right_pillar|narrow_front)\.mp4$',
+    re.IGNORECASE
+)
+
+# Already-renamed pattern: date-DAY-starttime-endtime-camera.mp4
+_ALREADY_RENAMED_RE = re.compile(
+    r'^\d{4}-\d{2}-\d{2}-[A-Z]{2,3}-\d{1,2}-\d{2}.*\.mp4$',
+    re.IGNORECASE
+)
 
 # Force unbuffered output for real-time UI updates
 sys.stdout.reconfigure(encoding='utf-8', line_buffering=True)
@@ -450,6 +463,7 @@ def _build_rename(start_text, end_text, camera_label=None):
     Build a compact filename from start/end timestamps and optional camera label.
     Format: date-day_of_week-start_time-end_time-camera_location.mp4
     E.g. '2025-10-21-TUE-09-06-03am-09-12-00am-driveway1104.mp4'
+    Requires both a valid date and camera label to rename.
     """
     start_date, start_time, start_day = _parse_timestamp_parts(start_text)
     end_date, end_time, end_day = _parse_timestamp_parts(end_text)
@@ -457,13 +471,17 @@ def _build_rename(start_text, end_text, camera_label=None):
     # Pick the date and day of week (prefer start, fall back to end)
     date = start_date or end_date
     day_of_week = start_day or end_day
+    label = _sanitize_label(camera_label)
+
+    # Skip rename if no date or no camera label
+    if not date or not label:
+        return None
 
     # Build name parts list
     parts = []
 
     # Date
-    if date:
-        parts.append(date)
+    parts.append(date)
 
     # Day of week
     if day_of_week:
@@ -478,12 +496,7 @@ def _build_rename(start_text, end_text, camera_label=None):
         parts.append(end_time)
 
     # Camera label (at the end)
-    label = _sanitize_label(camera_label)
-    if label:
-        parts.append(label)
-
-    if not parts or (not start_time and not end_time):
-        return None
+    parts.append(label)
 
     return "-".join(parts) + ".mp4"
 
@@ -566,6 +579,29 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None,
     for idx, video_path in enumerate(mp4_files):
         filename = os.path.basename(video_path)
         print(f"\n[BATCH] Processing {idx+1}/{len(mp4_files)}: {filename}")
+
+        # Skip Tesla dashcam files (no burned-in timestamps)
+        if _TESLA_DASHCAM_RE.match(filename):
+            print(f"[BATCH] Skipping {filename} — Tesla dashcam file")
+            result = {
+                "original_file": filename,
+                "new_file": filename,
+                "camera_label": None,
+                "folder": os.path.dirname(os.path.abspath(video_path)),
+                "start_timestamp": None,
+                "end_timestamp": None,
+                "duration_sec": 0,
+                "renamed": False,
+                "error": "Tesla dashcam — skipped"
+            }
+            all_results.append(result)
+            print(f"[BATCH_RESULT] {json.dumps(result)}")
+            continue
+
+        # Skip files already renamed by this script
+        if _ALREADY_RENAMED_RE.match(filename):
+            print(f"[BATCH] Skipping {filename} — already renamed")
+            continue
 
         # Extract only 2 frames: first + last
         frames, duration = _extract_frames(video_path, num_frames=2)
