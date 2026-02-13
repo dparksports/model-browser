@@ -50,5 +50,5 @@ meeting/
 *.csv
 *.txt
 !requirements.txt
-!apikey.txt
+apikey.txt
 
