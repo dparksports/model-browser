@@ -51,7 +51,7 @@ def _load_vlm():
                 torch.zeros(1, device="cuda")
                 use_cuda = True
                 gpu_name = torch.cuda.get_device_name(0)
-                gpu_mem = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 print(f"[TIMESTAMP] GPU detected: {gpu_name} ({gpu_mem:.1f} GB)")
             except RuntimeError as e:
                 print(f"[TIMESTAMP] GPU available but unusable ({e}) — falling back to CPU.")
