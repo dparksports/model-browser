@@ -19,6 +19,31 @@ import os
 import sys
 
 # ---------------------------------------------------------------------------
+# WINDOWS CUDA PATH FIX
+# ---------------------------------------------------------------------------
+# If the user just installed CUDA, the parent shell won't have the new PATH yet.
+# We manually add the default CUDA 12.6 bin directory to environment and DLL search path.
+try:
+    _cuda_dirs = []
+    for _ver in ["v13.1", "v12.6"]:
+        _base = rf"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\{_ver}"
+        # CUDA 13.x puts DLLs in bin\x64\; older versions use bin\
+        for _sub in [os.path.join(_base, "bin", "x64"), os.path.join(_base, "bin")]:
+            if os.path.exists(_sub):
+                _cuda_dirs.append(_sub)
+
+    for _cuda_bin in _cuda_dirs:
+        # 1. Update PATH for subprocesses / legacy load
+        if _cuda_bin.lower() not in os.environ["PATH"].lower():
+            os.environ["PATH"] += ";" + _cuda_bin
+
+        # 2. Update DLL search path (Python 3.8+)
+        if hasattr(os, "add_dll_directory"):
+            os.add_dll_directory(_cuda_bin)
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
 # Default transcript directory
 # ---------------------------------------------------------------------------
 
@@ -27,6 +52,26 @@ _DEFAULT_TRANSCRIPT_DIR = os.path.join(
 )
 
 _CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".last_model")
+_REGISTRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "installed_models.json")
+
+
+def _load_registry_models():
+    """Load installed models from JSON registry and return dict suitable for _gguf_models."""
+    models = {}
+    if not os.path.exists(_REGISTRY_FILE):
+        return models
+    try:
+        with open(_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            for k, v in data.items():
+                alias = v.get("alias") or k.split("/")[-1].replace(".gguf", "")
+                repo = v.get("repo_id")
+                filename = v.get("filename")
+                if alias and repo and filename:
+                    models[alias] = (repo, filename)
+    except Exception:
+        pass
+    return models
 
 
 def _load_last_model():
@@ -36,7 +81,8 @@ def _load_last_model():
             with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             alias = data.get("model")
-            if alias and alias in _gguf_models:
+            # Check if valid (in hardcoded list or registry)
+            if alias and (alias in _gguf_models):
                 return alias
     except Exception:
         pass
@@ -76,7 +122,7 @@ _gguf_models = {
         "bartowski/gemma-2-2b-it-GGUF",
         "gemma-2-2b-it-Q4_K_M.gguf",
     ),
-    # Extended catalog (matches model_browser.py)
+    # Extended catalog (matches install_models.py)
     "qwen2.5-0.5b": (
         "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
         "qwen2.5-0.5b-instruct-q4_k_m.gguf",
@@ -172,6 +218,12 @@ _gguf_models = {
     ),
 }
 
+# Merge installed models into the hardcoded list
+_installed = _load_registry_models()
+if _installed:
+    print(f"[INIT] Loaded {len(_installed)} models from installed_models.json")
+    _gguf_models.update(_installed)
+
 
 # ---------------------------------------------------------------------------
 # Interactive model picker — shows only already-downloaded models
@@ -204,8 +256,8 @@ def _pick_model_interactive():
     downloaded = _find_downloaded_models()
     if not downloaded:
         print("\n[WARNING] No models are downloaded yet.")
-        print("  Run model_browser.py to download a model first:")
-        print("    python model_browser.py")
+        print("  Run install_models.py to download a model first:")
+        print("    python install_models.py")
         return None
 
     print("\n" + "=" * 60)
@@ -260,6 +312,7 @@ def _load_llm(model_name=None):
             print(f"[LOAD] Using saved model: {saved}")
             model_name = saved
         else:
+            print(f"[WARNING] Model '{model_name}' not found. Defaulting to phi-3-mini.")
             model_name = "phi-3-mini"
 
     # Remember this choice for next time
@@ -433,7 +486,11 @@ Signs of REAL MEETING: varied sentences, questions and answers, topic changes, \
 multiple speakers, natural conversation flow, specific details like names/places/plans.
 
 Respond with ONLY this JSON (no other text):
-{{"has_meeting": true, "confidence": 85, "reason": "one sentence explanation"}}
+{{
+    "has_meeting": true, 
+    "confidence": 85, 
+    "reason": "one sentence explanation"
+}}
 
 The confidence field is an integer from 0 to 100 where 100 means absolute certainty.
 
@@ -505,6 +562,8 @@ def detect_meetings(
         if total == 0:
             print("[DETECT] All files already checked!")
             print(json.dumps({"status": "complete", "action": "detect_meetings", "results": results}))
+            # Still output summary if meaningful results exist
+            _write_summary(directory, results)
             return
 
     # -- Pre-load local LLM once for the entire batch ----------------------------
@@ -622,7 +681,50 @@ def detect_meetings(
             print(f"  [ERROR] {e}")
             results.append({"file": fpath, "has_meeting": False, "confidence": 0, "reason": str(e)})
 
-    # -- Summary -----------------------------------------------------------------
+    # -- Summary Output ----------------------------------------------------------
+    _write_summary(directory, results)
+    _write_csv(directory, results)
+
+    # -- Save report -------------------------------------------------------------
+    report_path = os.path.join(directory, "detection_report.json")
+    try:
+        with open(report_path, "w", encoding="utf-8") as rf:
+            json.dump(results, rf, indent=2)
+        print(f"\n[DETECT] Detailed JSON report saved to {report_path}")
+    except Exception as ex:
+        print(f"[WARNING] Could not save report: {ex}")
+
+
+def _write_csv(directory, results):
+    """Write detection results to a CSV file."""
+    import csv
+    csv_path = os.path.join(directory, "found_meetings.csv")
+
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            # Header
+            writer.writerow(["File", "Has Meeting", "Confidence", "Reason"])
+
+            # Rows
+            for r in results:
+                writer.writerow([
+                    os.path.basename(r["file"]),
+                    "Yes" if r["has_meeting"] else "No",
+                    f"{r['confidence']}%",
+                    r["reason"]
+                ])
+
+        print(f"[DETECT] CSV export saved to {csv_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to write CSV file: {e}")
+
+
+def _write_summary(directory, results):
+    """Write a human-readable summary of the detection results."""
+    summary_path = os.path.join(directory, "meetings_summary.txt")
+    meetings_found = sum(1 for r in results if r.get("has_meeting"))
+
     print(f"\n{'=' * 60}")
     print("MEETING DETECTION COMPLETE")
     print(f"{'=' * 60}")
@@ -630,20 +732,31 @@ def detect_meetings(
     print(f"Meetings found:    {meetings_found}")
     print(f"Hallucinated:      {len(results) - meetings_found}")
 
-    if meetings_found > 0:
-        print("\n--- Files with Real Meetings ---")
-        for r in results:
-            if r["has_meeting"]:
-                print(f"  ✅ {os.path.basename(r['file'])} ({r['confidence']}%) — {r['reason']}")
-
-    # -- Save report -------------------------------------------------------------
-    report_path = os.path.join(directory, "detection_report.json")
     try:
-        with open(report_path, "w", encoding="utf-8") as rf:
-            json.dump(results, rf, indent=2)
-        print(f"\n[DETECT] Report saved to {report_path}")
-    except Exception as ex:
-        print(f"[WARNING] Could not save report: {ex}")
+        with open(summary_path, "w", encoding="utf-8") as f:
+            f.write("MEETING DETECTION SUMMARY\n")
+            f.write("========================\n\n")
+            
+            if meetings_found > 0:
+                f.write("✅ CONFIRMED MEETINGS:\n")
+                print("\n--- Files with Real Meetings ---")
+                for r in results:
+                    if r.get("has_meeting"):
+                        line = f"  [{r['confidence']}%] {os.path.basename(r['file'])} — {r['reason']}"
+                        print(line)
+                        f.write(line + "\n")
+            else:
+                f.write("No meetings detected.\n")
+
+            f.write("\n\n❌ HALLUCINATIONS / NO MEETINGS:\n")
+            for r in results:
+                if not r.get("has_meeting"):
+                   f.write(f"  [{r['confidence']}%] {os.path.basename(r['file'])} — {r['reason']}\n")
+
+        print(f"\n[DETECT] Summary file created: {summary_path}")
+        print(f"         (Open this file to see which transcripts have meetings)")
+    except Exception as e:
+        print(f"[ERROR] Failed to write summary file: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -668,7 +781,9 @@ Examples:
   # Resume a previous scan (skip already-checked files)
   python detect_meetings.py --provider local --skip-checked
 
-Available local models: """ + ", ".join(sorted(_gguf_models.keys())),
+  # Install more models:
+  python install_models.py
+"""
     )
     parser.add_argument(
         "--dir",
@@ -685,8 +800,7 @@ Available local models: """ + ", ".join(sorted(_gguf_models.keys())),
         "--model",
         default="phi-3-mini",
         help="Local GGUF model preset (default: phi-3-mini). "
-        "Use 'pick' to interactively choose from downloaded models. "
-        f"Presets: {', '.join(sorted(_gguf_models.keys()))}",
+        "Use 'pick' to interactively choose from downloaded models.",
     )
     parser.add_argument("--api-key", help="API key for cloud provider (gemini/openai/claude)")
     parser.add_argument("--cloud-model", help="Override cloud model name (e.g. gpt-4o, gemini-2.0-flash)")

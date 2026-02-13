@@ -1,4 +1,4 @@
-# 🤖 Model Browser & Downloader
+# 🤖 Install Models & Downloader
 
 **Discovery, benchmarks, and smart GPU fit — 100% offline.**
 
@@ -52,13 +52,13 @@ The browser prioritizes models from **Unsloth** because they are consistently th
 
 ```bash
 # Browse top models (interactive mode)
-python model_browser.py
+python install_models.py
 
 # Search for specific models
-python model_browser.py --search "deepseek"
+python install_models.py --search "deepseek"
 
 # Show more results
-python model_browser.py --top 20
+python install_models.py --top 20
 ```
 
 ### Interactive Commands
@@ -68,6 +68,18 @@ Inside the browser:
 - `b`: View **Benchmark Comparisons** (local vs commercial).
 - `s`: Search for models.
 - `q`: Quit.
+
+## Meeting Detection
+
+To detect meetings in your transcripts, run:
+
+```bash
+python detect_meetings.py --provider local --model pick
+```
+
+This will generate two summary files in the transcript directory:
+1. `meetings_summary.txt`: A quick text overview of files with confirmed meetings.
+2. `found_meetings.csv`: A structured CSV file with columns for File, Has Meeting, Confidence, and Reason.
 
 ## Installation
 

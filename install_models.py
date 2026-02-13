@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-Model Browser & Downloader
+Install Models & Downloader
 ──────────────────────────
-Dynamic CLI that fetches the most popular GGUF models from HuggingFace,
-shows Unsloth optimised models first, and lets you download directly.
+Install models from HuggingFace, show Unsloth optimised models first, and keep track of installed models.
 
 No hardcoded model lists — always shows the latest releases.
 
 Usage::
 
-    python model_browser.py                     # top 10 Unsloth + 10 community
-    python model_browser.py --search "deepseek" # free-form search
-    python model_browser.py --top 20            # show top 20 per section
-    python model_browser.py --gpu 5090          # detect GPU for context
+    python install_models.py                     # top 10 Unsloth + 10 community
+    python install_models.py --search "deepseek" # free-form search
+    python install_models.py --top 20            # show top 20 per section
+    python install_models.py --gpu 5090          # detect GPU for context
 """
 
 import argparse
+import json
 import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
+import time
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ANSI colour helpers
@@ -92,6 +93,62 @@ def _vram_for_gpu_flag(flag):
         return float(flag_lower)
     except ValueError:
         return 0
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Registry Helpers (installed_models.json)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_REGISTRY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "installed_models.json")
+
+def _load_registry():
+    """Load installed models from JSON registry."""
+    if not os.path.exists(_REGISTRY_FILE):
+        return {}
+    try:
+        with open(_REGISTRY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_registry(registry):
+    """Save registry to JSON."""
+    try:
+        with open(_REGISTRY_FILE, "w", encoding="utf-8") as f:
+            json.dump(registry, f, indent=2)
+    except Exception as e:
+        print(f"{_RED}[ERROR] Failed to save registry: {e}{_RESET}")
+
+def _update_registry(repo_id, filename, capabilities=""):
+    """Register a newly downloaded model."""
+    registry = _load_registry()
+    
+    # Store by a unique key (repo+filename)
+    key = f"{repo_id}/{filename}"
+    
+    # Generate a simple alias for CLI usage (e.g. "phi-3-mini")
+    # We strip "-GGUF" and "Instruct" to keep it short if possible
+    alias_candidate = repo_id.split("/")[-1].replace("-GGUF", "").replace("-Instruct", "").replace("-it", "").lower()
+    if "unsloth" in repo_id.lower() and not alias_candidate.startswith("unsloth"):
+        alias_candidate = f"unsloth-{alias_candidate}"
+    
+    registry[key] = {
+        "repo_id": repo_id,
+        "filename": filename,
+        "downloaded_at": time.time(),
+        "capabilities": capabilities,
+        "alias": alias_candidate
+    }
+    _save_registry(registry)
+    print(f"{_GREEN}📝 Registered model in installed_models.json (alias: {alias_candidate}){_RESET}")
+
+def _is_installed(repo_id):
+    """Check if any file from this repo is in our registry."""
+    registry = _load_registry()
+    for k, v in registry.items():
+        if v.get("repo_id") == repo_id:
+            return True
+    return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -267,11 +324,11 @@ def _fetch_model_details(repo_id):
         return files, meta
 
     except Exception as e:
-        print(f"{_RED}  [ERROR] Could not fetch details: {e}{_RESET}")
+        # print(f"{_RED}  [ERROR] Could not fetch details: {e}{_RESET}")
         return [], {}
 
 
-def _download_file(repo_id, filename):
+def _download_file(repo_id, filename, caps=""):
     """Download a single file from HuggingFace. Returns local path or None."""
     try:
         from huggingface_hub import hf_hub_download
@@ -284,6 +341,10 @@ def _download_file(repo_id, filename):
     try:
         path = hf_hub_download(repo_id=repo_id, filename=filename)
         print(f"{_GREEN}✅ Downloaded to: {path}{_RESET}")
+        
+        # Update registry!
+        _update_registry(repo_id, filename, caps)
+        
         return path
     except Exception as e:
         print(f"{_RED}[ERROR] Download failed: {e}{_RESET}")
@@ -296,11 +357,11 @@ def _download_file(repo_id, filename):
 
 def _print_table(unsloth_models, community_models, gpu_name, gpu_vram):
     """Render compact tables for live-fetched model repos."""
-    w = 140
+    w = 145
 
     print()
     print(f"{_BOLD}{_CYAN}{'═' * w}{_RESET}")
-    print(f"{_BOLD}{_CYAN}{'🤖  Top GGUF Models (live from HuggingFace)':^{w}}{_RESET}")
+    print(f"{_BOLD}{_CYAN}{'🤖  Install Models (live from HuggingFace)':^{w}}{_RESET}")
     print(f"{_BOLD}{_CYAN}{'═' * w}{_RESET}")
 
     if gpu_name:
@@ -342,7 +403,7 @@ def _print_table(unsloth_models, community_models, gpu_name, gpu_vram):
                         recommended_idx = j  # first (largest) that fits
 
         print(f"{_BOLD}{_MAGENTA}  ── {title} {'─' * max(1, w - len(title) - 7)}{_RESET}")
-        print(f"  {_BOLD}{_WHITE}{'#':>3}   {'Repository':<40}  {'Params':<6}  {'~Q4 Size':>8}  {'Capabilities':<14}  {'Downloads':>10}  {'Updated':<10}  {'Fit':<18}{_RESET}")
+        print(f"  {_BOLD}{_WHITE}{'#':>3}   {'Repository':<40}  {'Params':<6}  {'~Q4 Size':>8}  {'Capabilities':<14}  {'Status':<14} {'Downloads':>10}  {'Updated':<10}  {'Fit':<18}{_RESET}")
         print(f"  {'─' * (w - 4)}")
         for i, m in enumerate(models, offset + 1):
             est = _estimate_q4_size(m['params'])
@@ -359,8 +420,12 @@ def _print_table(unsloth_models, community_models, gpu_name, gpu_vram):
             else:
                 fit = ""
 
+            # Check installed status
+            is_inst = _is_installed(m["repo_id"])
+            status = f"{_GREEN}💾 Installed{_RESET}" if is_inst else ""
+
             # Recommended tag
-            rec = f" {_GREEN}← recommended{_RESET}" if (i - offset - 1) == recommended_idx else ""
+            rec = f" {_GREEN}← recommended{_RESET}" if (i - offset - 1) == recommended_idx and not is_inst else ""
 
             dl = f"{m['downloads']:,}" if m['downloads'] else "?"
             print(
@@ -369,6 +434,7 @@ def _print_table(unsloth_models, community_models, gpu_name, gpu_vram):
                 f"{m['params']:<6}  "
                 f"{size_str:>8}  "
                 f"{m.get('caps', ''):<14}  "
+                f"{status:<14} "
                 f"{dl:>10}  {m['updated']:<10}  "
                 f"{fit}{rec}"
             )
@@ -554,7 +620,7 @@ _SIZE_TIERS = [
 ]
 
 
-def _check_downloaded(repo_id):
+def _check_downloaded_legacy(repo_id):
     """Check if any GGUF files from this repo exist in the HuggingFace cache."""
     try:
         cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
@@ -609,9 +675,8 @@ def _print_capabilities_catalog(gpu_vram):
             catalog_models.append(m)
 
             # Check download status
-            downloaded = _check_downloaded(m["repo"])
+            downloaded = _is_installed(m["repo"]) or _check_downloaded_legacy(m["repo"])
             status = f"{_GREEN}Downloaded{_RESET}" if downloaded else f"{_DIM}Not yet{_RESET}"
-            status_raw = "Downloaded" if downloaded else "Not yet"
 
             # GPU fit
             if gpu_vram > 0:
@@ -783,7 +848,9 @@ def _show_and_download(repo_id):
         except ValueError:
             continue
         if 1 <= choice <= len(gguf_files):
-            _download_file(repo_id, gguf_files[choice - 1]["name"])
+            # Pass capabilities to download for registry
+            caps = _infer_capabilities(repo_id, meta.get("pipeline_tag"), meta.get("tags"))
+            _download_file(repo_id, gguf_files[choice - 1]["name"], caps=caps)
             return
 
 
@@ -932,11 +999,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=textwrap.dedent("""\
             Examples:
-              python model_browser.py                     # top 10 Unsloth + 10 community
-              python model_browser.py --top 20            # top 20 per section
-              python model_browser.py --search "deepseek" # free-form search
-              python model_browser.py --gpu 5090          # show GPU info
-              python model_browser.py --list              # print table and exit
+              python install_models.py                     # top 10 Unsloth + 10 community
+              python install_models.py --top 20            # top 20 per section
+              python install_models.py --search "deepseek" # free-form search
+              python install_models.py --gpu 5090          # show GPU info
+              python install_models.py --list              # print table and exit
 
             Interactive commands:
               #  - browse GGUF files and download
