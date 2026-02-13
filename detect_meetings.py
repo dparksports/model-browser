@@ -508,6 +508,7 @@ def detect_meetings(
     cloud_model=None,
     transcript_dir=None,
     skip_checked=False,
+    output_dir=".",
 ):
     """
     Scan all *_transcript*.txt files and classify each as real meeting vs.
@@ -543,7 +544,7 @@ def detect_meetings(
     # -- Skip previously-checked files if requested ------------------------------
     previously_checked = set()
     if skip_checked:
-        report_path = os.path.join(directory, "detection_report.json")
+        report_path = os.path.join(output_dir, "detection_report.json")
         if os.path.exists(report_path):
             try:
                 with open(report_path, "r", encoding="utf-8") as rf:
@@ -563,7 +564,8 @@ def detect_meetings(
             print("[DETECT] All files already checked!")
             print(json.dumps({"status": "complete", "action": "detect_meetings", "results": results}))
             # Still output summary if meaningful results exist
-            _write_summary(directory, results)
+            _write_summary(output_dir, results)
+            _write_csv(output_dir, results)
             return
 
     # -- Pre-load local LLM once for the entire batch ----------------------------
@@ -682,11 +684,11 @@ def detect_meetings(
             results.append({"file": fpath, "has_meeting": False, "confidence": 0, "reason": str(e)})
 
     # -- Summary Output ----------------------------------------------------------
-    _write_summary(directory, results)
-    _write_csv(directory, results)
+    _write_summary(output_dir, results)
+    _write_csv(output_dir, results)
 
     # -- Save report -------------------------------------------------------------
-    report_path = os.path.join(directory, "detection_report.json")
+    report_path = os.path.join(output_dir, "detection_report.json")
     try:
         with open(report_path, "w", encoding="utf-8") as rf:
             json.dump(results, rf, indent=2)
@@ -696,7 +698,7 @@ def detect_meetings(
 
 
 def _write_csv(directory, results):
-    """Write detection results to a CSV file."""
+    """Write detection results to a CSV file (Only Confirmed Meetings)."""
     import csv
     csv_path = os.path.join(directory, "found_meetings.csv")
 
@@ -706,16 +708,19 @@ def _write_csv(directory, results):
             # Header
             writer.writerow(["File", "Has Meeting", "Confidence", "Reason"])
 
-            # Rows
+            # Rows - FILTER: Only write if has_meeting is True
+            count = 0
             for r in results:
-                writer.writerow([
-                    os.path.basename(r["file"]),
-                    "Yes" if r["has_meeting"] else "No",
-                    f"{r['confidence']}%",
-                    r["reason"]
-                ])
+                if r.get("has_meeting"):
+                    writer.writerow([
+                        os.path.basename(r["file"]),
+                        "Yes",
+                        f"{r['confidence']}%",
+                        r["reason"]
+                    ])
+                    count += 1
 
-        print(f"[DETECT] CSV export saved to {csv_path}")
+        print(f"[DETECT] CSV export saved to {csv_path} ({count} meetings)")
     except Exception as e:
         print(f"[ERROR] Failed to write CSV file: {e}")
 
@@ -810,8 +815,21 @@ Examples:
         action="store_true",
         help="Skip files already analysed in a previous detection_report.json",
     )
+    parser.add_argument(
+        "--output",
+        default=".",
+        help="Directory to save results (default: current directory)",
+    )
 
     args = parser.parse_args()
+
+    # Ensure output directory exists
+    if args.output and not os.path.exists(args.output):
+        try:
+            os.makedirs(args.output)
+        except Exception as e:
+            print(f"[ERROR] Could not create output directory: {e}")
+            return
 
     detect_meetings(
         directory=args.dir,
@@ -821,6 +839,7 @@ Examples:
         cloud_model=args.cloud_model,
         transcript_dir=args.transcript_dir,
         skip_checked=args.skip_checked,
+        output_dir=args.output,
     )
 
 
