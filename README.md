@@ -1,112 +1,79 @@
-# Meeting Detector
+# 🤖 Model Browser & Downloader
 
-Standalone CLI tool that scans transcript files and uses an LLM to classify each
-as a **real meeting/conversation** or **hallucinated** output from a speech-recognition
-model (e.g. Whisper).
+**Discovery, benchmarks, and smart GPU fit — 100% offline.**
 
-Extracted from [TurboScribe](https://github.com/dparksports/turboscribe).
+A powerful CLI tool to browse, analyze, and download the best local LLMs (GGUF format) from HuggingFace. It bridges the gap between raw file listings and informed decision-making by providing capability insights, hardware compatibility checks, and benchmark comparisons directly in your terminal.
 
-## Setup
+## Key Features
 
-### Prerequisites
-- Python 3.10+
-- NVIDIA CUDA Toolkit 12.8 (for RTX 5090 GPU acceleration)
+### 1. ⚡ Live Model Listing
+Fetches the top trending models dynamically from HuggingFace.
+- **Smart Sorting:** Sorts by parameter size vs popularity.
+- **Heuristic Capabilities:** Auto-detects features like Vision (👁️), Coding (💻), Reasoning (🧠), and Multilingual (🌍) support from model names and metadata.
+- **Real-time Stats:** Shows download counts and last update dates.
 
-### Install
-```powershell
-.\install_libraries.ps1
-```
+### 2. 🖥️ Smart GPU Fit
+Automatically detects your NVIDIA GPU (e.g., RTX 3090, 4090, 5090) and calculates VRAM usage for every model.
+- **Fit Indicators:** 
+  - ✅ **fits**: Runs comfortably.
+  - ⚠️ **tight**: Might fit with reduced context.
+  - ❌ **too big**: Exceeds VRAM.
+- **Recommendation:** Flags the largest model that fits your hardware (`← recommended`).
 
-This creates a `meeting` virtual environment and installs:
-| Package | Purpose |
-|---|---|
-| `llama-cpp-python` (CUDA 12.8) | Local GGUF model inference on GPU |
-| `huggingface-hub` | Auto-download GGUF models |
-| `openai` | Gemini & OpenAI cloud APIs |
-| `anthropic` | Claude cloud API |
+### 3. 🧭 Curated Catalog (`c` command)
+Built-in offline database of 22+ top-tier models (Qwen, Llama, Gemma, Phi, Mistral, DeepSeek) organized by size:
+- **Tiny (≤3B)** to **XL (>32B)** tiers.
+- **Maker Info:** See who built it (Google, Meta, Alibaba, Mistral, etc.).
+- **Download Status:** Instantly see which models you already have cached.
 
----
+### 4. 📊 Benchmark Comparison (`b` command)
+Compare local models against commercial giants **without leaving your terminal**.
+- **Baselines:** Shows GPT-4o, Claude 3.5 Sonnet, and Gemini 1.5 Pro scores for reference.
+- **Local Rankings:** Lists the best models that fit *your* specific GPU, ranked by quality.
+- **Metrics:**
+  - **MMLU** (Knowledge)
+  - **HumanEval** (Coding)
+  - **MT-Bench** (Chat Quality)
+- **Visual Verdicts:** "72% of GPT-4o quality", "Near-commercial grade", etc.
 
-## Quick Start
+### 5. 📦 Intelligent Downloader
+- Browses individual GGUF quantizations (Q4_K_M, Q8_0, IQ2_XS, etc.).
+- Shows exact file sizes and fit status for *each quantization*.
+- Filters out non-GGUF files automatically.
 
-```powershell
-# 1. Activate the environment
-.\meeting\Scripts\activate
+## Usage
 
-# 2. Browse & download a model (live from HuggingFace)
+```bash
+# Browse top models (interactive mode)
 python model_browser.py
 
-# 3. Run detection with interactive model picker
-python detect_meetings.py --model pick
+# Search for specific models
+python model_browser.py --search "deepseek"
+
+# Show more results
+python model_browser.py --top 20
 ```
 
-On subsequent runs, your model selection is remembered automatically.
+### Interactive Commands
+Inside the browser:
+- `number`: Select a model to see details & download files.
+- `c`: Open the **Capabilities Catalog** (curated list).
+- `b`: View **Benchmark Comparisons** (local vs commercial).
+- `s`: Search for models.
+- `q`: Quit.
 
----
+## Installation
 
-## Model Browser
+Requires Python 3.8+ and `huggingface_hub`.
 
-Fetches the most popular GGUF models **live from HuggingFace** — always up-to-date, no hardcoded lists.
-
-| Command | What it does |
-|---|---|
-| `python model_browser.py` | Top 10 ⚡Unsloth + top 10 community models |
-| `python model_browser.py --top 20` | Show top 20 per section |
-| `python model_browser.py --search "deepseek"` | Free-form search for any model |
-| `python model_browser.py --gpu 5090` | Show GPU info alongside results |
-| `python model_browser.py --list` | Print table and exit (no download) |
-
-Select a model to see its available GGUF quantisations (Q4_K_M recommended) and download.
-
----
-
-## Detecting Meetings
-
-### Default Transcript Directory
-```
-%APPDATA%\LongAudioApp\Transcripts\
-```
-Override with `--dir "C:\MyFolder"` when needed.
-
-### Local LLM (GPU-accelerated, no API key)
-```powershell
-python detect_meetings.py --model pick       # interactive picker
-python detect_meetings.py --model phi-3-mini  # specific model
-python detect_meetings.py                     # uses last picked model
+```bash
+pip install huggingface_hub
 ```
 
-### Cloud Providers
-```powershell
-python detect_meetings.py --provider gemini --api-key YOUR_KEY
-python detect_meetings.py --provider openai --api-key YOUR_KEY
-python detect_meetings.py --provider claude --api-key YOUR_KEY
-```
-
-### Resume a Scan
-```powershell
-python detect_meetings.py --skip-checked
-```
-
----
-
-## How It Works
-
-1. **Discovery** — recursively finds `*_transcript*.txt` files in `--dir`
-2. **Heuristic pre-filter** — if >85% of lines are identical → hallucinated
-3. **LLM classification** — sends transcript to LLM → `{has_meeting, confidence, reason}`
-4. **Report** — saves `detection_report.json` with all results
-
-```json
-[
-  {
-    "file": "C:\\Audio\\call_transcript_large-v3.txt",
-    "has_meeting": true,
-    "confidence": 92,
-    "reason": "Contains varied conversation with multiple speakers"
-  }
-]
-```
+## Requirements
+- Windows, Linux, or macOS.
+- NVIDIA GPU recommended (for VRAM detection features), but works on CPU.
+- Internet connection (for live listings/downloads). Benchmarks and catalog are offline-available.
 
 ## License
-
-Apache-2.0 (same as TurboScribe)
+MIT
