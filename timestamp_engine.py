@@ -299,11 +299,34 @@ def run_extract_timestamps(file_path, num_frames=5, crop_ratio=0.08):
     return output
 
 
-def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None):
+def _sanitize_for_filename(timestamp_text):
+    """
+    Convert a raw timestamp string into a filesystem-safe name.
+    E.g. '2024/01/15 10:30:22' → '2024-01-15_10-30-22'
+    """
+    if not timestamp_text:
+        return None
+    # Replace common separators with dashes/underscores
+    import re
+    s = timestamp_text.strip()
+    # Normalize date separators (/ . ) to dash
+    s = re.sub(r'[/.]', '-', s)
+    # Replace colons with dashes (time)
+    s = s.replace(':', '-')
+    # Replace spaces with underscores
+    s = re.sub(r'\s+', '_', s)
+    # Remove any remaining unsafe characters
+    s = re.sub(r'[<>:"/\\|?*]', '', s)
+    return s if s else None
+
+
+def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None, do_rename=True):
     """
     Process all .mp4 files in a folder, extracting start/end timestamps
     for batch renaming. Uses only 2 frames per video for speed.
+    Renames files by default and saves results to CSV.
     """
+    import csv
     import glob
 
     if not os.path.isdir(folder_path):
@@ -327,12 +350,19 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None)
         return
 
     print(f"[BATCH] Found {len(mp4_files)} video(s) in {scope}")
+    if do_rename:
+        print(f"[BATCH] Files will be renamed after timestamp extraction.")
+    else:
+        print(f"[BATCH] Rename disabled (--no-rename). Files will not be renamed.")
 
     # Pre-load VLM once for all videos
     model, processor = _load_vlm()
     if model is None:
         print("[ERROR] Cannot load VLM model — aborting batch.")
         return
+
+    all_results = []
+    renamed_count = 0
 
     for idx, video_path in enumerate(mp4_files):
         filename = os.path.basename(video_path)
@@ -343,14 +373,17 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None)
         if len(frames) < 2:
             print(f"[BATCH] Skipping {filename} — could not extract 2 frames")
             result = {
-                "file": filename,
-                "path": os.path.abspath(video_path),
+                "original_file": filename,
+                "new_file": None,
+                "folder": os.path.dirname(os.path.abspath(video_path)),
                 "start_timestamp": None,
                 "end_timestamp": None,
+                "duration_sec": round(duration, 1) if duration else 0,
+                "renamed": False,
                 "error": "Could not extract frames"
             }
+            all_results.append(result)
             print(f"[BATCH_RESULT] {json.dumps(result)}")
-            # Cleanup
             _cleanup_frames(frames)
             continue
 
@@ -368,19 +401,74 @@ def run_batch_rename(folder_path, crop_ratio=0.08, recursive=False, prefix=None)
             label = "start" if i == 0 else "end"
             print(f"[BATCH]   {label}: {raw}")
 
+        # Build new filename from timestamps
+        new_filename = None
+        was_renamed = False
+
+        if do_rename and (start_text or end_text):
+            start_safe = _sanitize_for_filename(start_text)
+            end_safe = _sanitize_for_filename(end_text)
+
+            if start_safe and end_safe:
+                new_filename = f"{start_safe}_to_{end_safe}.mp4"
+            elif start_safe:
+                new_filename = f"{start_safe}.mp4"
+            elif end_safe:
+                new_filename = f"{end_safe}.mp4"
+
+            if new_filename and new_filename != filename:
+                new_path = os.path.join(os.path.dirname(video_path), new_filename)
+                # Avoid overwriting existing files
+                if os.path.exists(new_path):
+                    base, ext = os.path.splitext(new_filename)
+                    counter = 2
+                    while os.path.exists(new_path):
+                        new_filename = f"{base}_{counter}{ext}"
+                        new_path = os.path.join(os.path.dirname(video_path), new_filename)
+                        counter += 1
+
+                try:
+                    os.rename(video_path, new_path)
+                    was_renamed = True
+                    renamed_count += 1
+                    print(f"[BATCH] ✓ Renamed → {new_filename}")
+                except OSError as e:
+                    print(f"[BATCH] ✗ Rename failed: {e}")
+            elif new_filename == filename:
+                print(f"[BATCH] Already named correctly, skipping rename.")
+
         result = {
-            "file": filename,
-            "path": os.path.abspath(video_path),
+            "original_file": filename,
+            "new_file": new_filename if was_renamed else filename,
+            "folder": os.path.dirname(os.path.abspath(video_path)),
             "start_timestamp": start_text,
             "end_timestamp": end_text,
-            "duration_sec": round(duration, 1)
+            "duration_sec": round(duration, 1),
+            "renamed": was_renamed,
+            "error": None
         }
+        all_results.append(result)
         print(f"[BATCH_RESULT] {json.dumps(result)}")
 
         # Cleanup temp frames
         _cleanup_frames(frames)
 
-    print(f"\n[BATCH] Done — processed {len(mp4_files)} videos.")
+    # Save CSV report
+    csv_path = os.path.join(folder_path, "batch_timestamps.csv")
+    try:
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=[
+                "original_file", "new_file", "folder",
+                "start_timestamp", "end_timestamp",
+                "duration_sec", "renamed", "error"
+            ])
+            writer.writeheader()
+            writer.writerows(all_results)
+        print(f"\n[BATCH] CSV saved → {csv_path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to write CSV: {e}")
+
+    print(f"[BATCH] Done — processed {len(mp4_files)} videos, renamed {renamed_count}.")
 
 
 def _cleanup_frames(frames):
@@ -403,10 +491,12 @@ if __name__ == "__main__":
     parser.add_argument("--prefix", help="Only process files starting with this prefix (e.g., 'reo')")
     parser.add_argument("--num-frames", type=int, default=5, help="Number of frames to extract (default: 5)")
     parser.add_argument("--crop-ratio", type=float, default=0.08, help="Fraction of frame height to crop from top (default: 0.08)")
+    parser.add_argument("--no-rename", action="store_true", help="Do not rename files, only extract timestamps and save CSV")
     args = parser.parse_args()
 
     if args.batch_folder:
-        run_batch_rename(args.batch_folder, crop_ratio=args.crop_ratio, recursive=args.recursive, prefix=args.prefix)
+        run_batch_rename(args.batch_folder, crop_ratio=args.crop_ratio, recursive=args.recursive,
+                         prefix=args.prefix, do_rename=not args.no_rename)
     elif args.file:
         run_extract_timestamps(args.file, num_frames=args.num_frames, crop_ratio=args.crop_ratio)
     else:
